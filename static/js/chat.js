@@ -350,7 +350,7 @@ class ChatBot {
     addMessage(role, content) {
         const messagesContainer = document.getElementById('chat-messages');
         
-        const messageDiv = document.createElement('div');
+        const messageDiv = document.createElement ('div');
         messageDiv.className = `chat-message ${role}`;
         
         const bubble = document.createElement('div');
