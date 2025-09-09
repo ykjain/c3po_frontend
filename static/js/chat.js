@@ -355,7 +355,7 @@ class ChatBot {
         
         const bubble = document.createElement('div');
         bubble.className = 'chat-message-bubble';
-        bubble.textContent = content;
+        bubble.innerHTML = this.renderMarkdown(content);
         
         const time = document.createElement('div');
         time.className = 'chat-message-time';
@@ -371,7 +371,11 @@ class ChatBot {
     }
 
     appendToMessage(bubble, content) {
-        bubble.textContent += content;
+        // For streaming, we need to accumulate text content and re-render
+        const currentText = bubble.getAttribute('data-raw-content') || '';
+        const newText = currentText + content;
+        bubble.setAttribute('data-raw-content', newText);
+        bubble.innerHTML = this.renderMarkdown(newText);
         this.scrollToBottom();
     }
 
@@ -498,6 +502,55 @@ class ChatBot {
         }
         
         this.updateSendButton();
+    }
+
+    renderMarkdown(text) {
+        if (!text) return '';
+        
+        // Escape HTML to prevent XSS
+        text = text.replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;');
+        
+        // Convert **bold** text
+        text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        
+        // Convert *italic* text
+        text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        
+        // Convert line breaks
+        text = text.replace(/\n/g, '<br>');
+        
+        // Convert bullet points
+        text = text.replace(/^[\s]*[-•]\s+(.+)$/gm, '<li>$1</li>');
+        text = text.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+        
+        // Convert numbered lists
+        text = text.replace(/^[\s]*\d+\.\s+(.+)$/gm, '<li>$1</li>');
+        
+        // First, temporarily mark existing links to protect them
+        const linkPlaceholder = '___LINK_PLACEHOLDER___';
+        const linkMap = [];
+        
+        // Convert links [text](url) format FIRST
+        text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+            const placeholder = `${linkPlaceholder}${linkMap.length}${linkPlaceholder}`;
+            linkMap.push(`<a href="${url}" target="_blank" rel="noopener">${text}</a>`);
+            return placeholder;
+        });
+        
+        // Convert plain URLs (but avoid double-converting)
+        text = text.replace(/(^|[^"'>])(https?:\/\/[^\s<>"]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+        
+        // Convert citations [1], [2], etc.
+        text = text.replace(/\[(\d+)\]/g, '<sup class="citation">[$1]</sup>');
+        
+        // Restore the protected links
+        linkMap.forEach((link, index) => {
+            text = text.replace(`${linkPlaceholder}${index}${linkPlaceholder}`, link);
+        });
+        
+        return text;
     }
 }
 
