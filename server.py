@@ -11,8 +11,24 @@ from flask_cors import CORS
 from PIL import Image
 import io
 
+# Import chat module
+try:
+    from chat import chat_bp
+    CHAT_AVAILABLE = True
+except ImportError as e:
+    print(f"Chat module not available: {e}")
+    CHAT_AVAILABLE = False
+    chat_bp = None
+
 app = Flask(__name__)
 CORS(app)
+
+# Register chat blueprint if available
+if CHAT_AVAILABLE and chat_bp:
+    app.register_blueprint(chat_bp)
+    print("Chat module registered successfully")
+else:
+    print("Chat module not registered")
 
 # Global variable to store program data
 programs_data = {}

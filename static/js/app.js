@@ -1405,5 +1405,5 @@ class HCAAtlasApp {
 
 // Initialize the application when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    new HCAAtlasApp();
+    window.hcaApp = new HCAAtlasApp();
 });
