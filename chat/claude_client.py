@@ -23,6 +23,7 @@ from .config import (
     DEBUG_CHAT
 )
 from .mcp_client import mcp_client
+from .fastmcp_client import fastmcp_client
 
 
 class ClaudeClient:
@@ -37,9 +38,11 @@ class ClaudeClient:
         
         self.client = Anthropic(api_key=ANTHROPIC_API_KEY)
         self.mcp_initialized = False
+        self.fastmcp_initialized = False
     
     async def ensure_mcp_initialized(self):
-        """Ensure MCP client is initialized."""
+        """Ensure MCP clients are initialized."""
+        # Initialize traditional MCP client (Perplexity)
         if not self.mcp_initialized:
             try:
                 await mcp_client.initialize()
@@ -50,6 +53,18 @@ class ClaudeClient:
                 if DEBUG_CHAT:
                     print(f"MCP initialization failed: {e}")
                 # Continue without MCP if it fails
+        
+        # Initialize FastMCP client (FinnGen)
+        if not self.fastmcp_initialized:
+            try:
+                await fastmcp_client.initialize()
+                self.fastmcp_initialized = True
+                if DEBUG_CHAT:
+                    print("FastMCP client initialized successfully")
+            except Exception as e:
+                if DEBUG_CHAT:
+                    print(f"FastMCP initialization failed: {e}")
+                # Continue without FastMCP if it fails
     
     def format_context_for_prompt(self, context: Dict) -> str:
         """Format page context into a readable prompt addition."""
@@ -119,8 +134,12 @@ class ClaudeClient:
             'content': user_message
         })
         
-        # Get available MCP tools
-        tools = mcp_client.get_tools_for_claude() if self.mcp_initialized else []
+        # Get available MCP tools from both clients
+        tools = []
+        if self.mcp_initialized:
+            tools.extend(mcp_client.get_tools_for_claude())
+        if self.fastmcp_initialized:
+            tools.extend(fastmcp_client.get_tools_for_claude())
         
         if DEBUG_CHAT:
             print(f"Sending to Claude: {len(messages)} messages")
@@ -221,12 +240,17 @@ class ClaudeClient:
                 print(f"Claude wants to use tool: {tool_name} with args: {arguments}")
             
             # Convert Claude tool name back to MCP format
-            # Claude tool name: perplexity-ask_perplexity_ask
-            # MCP tool name: perplexity-ask:perplexity_ask
+            # Claude tool name: perplexity-ask_perplexity_ask or finngen_query_credible_sets
+            # MCP tool name: perplexity-ask:perplexity_ask or finngen:query_credible_sets
             mcp_tool_name = tool_name.replace('_', ':', 1)  # Only replace first underscore
             
-            # Call the MCP tool
-            result = await mcp_client.call_tool(mcp_tool_name, arguments)
+            # Route to appropriate client based on tool name
+            if tool_name.startswith('finngen_'):
+                # Use FastMCP client for FinnGen tools
+                result = await fastmcp_client.call_tool(mcp_tool_name, arguments)
+            else:
+                # Use traditional MCP client for other tools (Perplexity)
+                result = await mcp_client.call_tool(mcp_tool_name, arguments)
             
             # Format the result for display
             if isinstance(result, dict):
