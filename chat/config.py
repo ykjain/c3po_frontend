@@ -98,7 +98,7 @@ MCP_SERVERS = [
     },
     {
         "name": "finngen",
-        "url": "https://52b3eba66b07.ngrok-free.app/mcp",
+        "url": "https://5efb01d2a5c6.ngrok-free.app/mcp",
         "transport": "http",
         "enabled": True,
         "description": "FinnGen Credible Sets API Server"

@@ -151,6 +151,12 @@ class HCAAtlasApp {
                             imageContainer.dataset.imageTitle,
                             imageContainer.dataset.imageSubtitle
                         );
+                    } else if (subtitle === 'program_umap_cell_type') {
+                        this.openCellTypeUmapModal(
+                            imageContainer.dataset.imageSrc,
+                            imageContainer.dataset.imageTitle,
+                            imageContainer.dataset.imageSubtitle
+                        );
                     } else {
                         this.openImageModal(
                             imageContainer.dataset.imageSrc,
@@ -404,7 +410,7 @@ class HCAAtlasApp {
                     <i class="fas fa-chevron-down expand-icon"></i>
                 </div>
                 <div class="section-content" data-section="images">
-                    ${this.createImagesGrid(programData.images)}
+                    ${this.createProgramVisualizations(programData)}
                 </div>
             </div>
         `;
@@ -454,12 +460,67 @@ class HCAAtlasApp {
         return sections;
     }
 
+    createProgramVisualizations(programData) {
+        let content = '';
+        
+        // Add per-program heatmaps section if available
+        if (programData.heatmaps && Object.keys(programData.heatmaps).length > 0) {
+            content += `
+                <div class="program-heatmaps-section" style="margin-bottom: 2rem;">
+                    <div class="heatmap-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(525px, 1fr)); gap: 1.5rem; justify-items: center;">
+            `;
+            
+            // Define heatmap order and titles
+            const heatmapConfig = {
+                'cell_type_by_program_activity': 'Cell Type Activity',
+                'leiden_cluster_by_program_activity': 'Leiden Cluster Activity'
+            };
+            
+            Object.entries(heatmapConfig).forEach(([key, title]) => {
+                if (programData.heatmaps[key]) {
+                    const imagePath = programData.heatmaps[key];
+                    const thumbnailPath = `${imagePath}?compress=true&quality=85&max_width=600`;
+                    const fullPath = `${imagePath}?compress=true&quality=95&max_width=1200`;
+                    
+                    content += `
+                        <div class="program-heatmap-item" style="max-width: 600px; width: 100%;">
+                            <div class="image-header" style="text-align: center; margin-bottom: 0.5rem;">
+                                <div class="image-title" style="font-size: 0.9rem; font-weight: 500;">${title}</div>
+                            </div>
+                            <div class="image-container" 
+                                 data-image-src="${fullPath}" 
+                                 data-image-title="${title}"
+                                 data-image-subtitle="Program Heatmap"
+                                 style="display: flex; justify-content: center; align-items: center; height: 800px;">
+                                <img src="${thumbnailPath}" 
+                                     alt="${title}" 
+                                     loading="lazy"
+                                     onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Heatmap not available</div>'"
+                                     onload="this.style.opacity=1" 
+                                     style="opacity:0;transition:opacity 0.3s;cursor:pointer; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid #ddd; border-radius: 6px;">
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            content += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Add UMAP section
+        content += this.createImagesGrid(programData.images);
+        
+        return content;
+    }
+
     createImagesGrid(images, imageMapping = null, context = null) {
         const defaultImageTypes = {
-            'program_violins_cell_type': 'Program Activity by Cell Type',
-            'program_violins_leiden': 'Program Activity by Leiden',
             'program_umap_leiden': 'Program UMAP - Leiden',
-            'program_umap_activity': 'Program UMAP - Activity'
+            'program_umap_activity': 'Program UMAP - Activity',
+            'program_umap_cell_type': 'Program UMAP - Cell Type'
         };
         
         // Use provided imageMapping or default
@@ -508,22 +569,52 @@ class HCAAtlasApp {
                         </div>
                     `;
                 } else {
-                    // Regular image handling
-                    const basePath = `/api/images/${path.replace('/mnt/vdd/hca_lung_atlas_tree/test_setup/assets/', '')}`;
+                    // Special handling for cell type UMAP - use the same path as node overview
+                    let thumbnailPath, fullPath;
+                    if (key === 'program_umap_cell_type') {
+                        const nodeName = this.currentNode;
+                        thumbnailPath = `/api/node-summary-image/${nodeName}/umap_cell_type.png?compress=true&quality=75&max_width=400`;
+                        fullPath = `/api/node-summary-image/${nodeName}/umap_cell_type.png?compress=true&quality=85&max_width=1200`;
+                    } else {
+                        // Regular image handling for Activity and Leiden UMAPs
+                        const basePath = `/api/images/${path.replace('/mnt/vdd/hca_lung_atlas_tree/test_setup/assets/', '')}`;
+                        
+                        // Increase resolution by 30% for Activity and Leiden UMAPs (400 * 1.3 = 520)
+                        const isActivityOrLeiden = key === 'program_umap_activity' || key === 'program_umap_leiden';
+                        const maxWidth = isActivityOrLeiden ? 520 : 400;
+                        
+                        thumbnailPath = `${basePath}?compress=true&quality=75&max_width=${maxWidth}`;
+                        fullPath = `${basePath}?compress=true&quality=85&max_width=1200`;
+                    }
                     
-                    // Use compressed images for thumbnails, original for modal
-                    const thumbnailPath = `${basePath}?compress=true&quality=75&max_width=400`;
-                    const fullPath = `${basePath}?compress=true&quality=85&max_width=1200`;
-                    
-                    // Check if this is a program activity UMAP that gets enhanced modal treatment
+                    // Check if this is a program activity UMAP or cell type UMAP that gets enhanced modal treatment
                     const isActivityUmap = key === 'program_umap_activity';
-                    const containerClass = isActivityUmap ? 'image-container program-activity-umap' : 'image-container';
-                    const badge = isActivityUmap ? `
-                        <div class="combined-badge">
-                            <i class="fas fa-columns"></i>
-                            Comparison
-                        </div>
-                    ` : '';
+                    const isCellTypeUmap = key === 'program_umap_cell_type';
+                    const isSpecialUmap = isActivityUmap || isCellTypeUmap;
+                    
+                    let containerClass = 'image-container';
+                    if (isActivityUmap) {
+                        containerClass = 'image-container program-activity-umap';
+                    } else if (isCellTypeUmap) {
+                        containerClass = 'image-container program-cell-type-umap';
+                    }
+                    
+                    let badge = '';
+                    if (isActivityUmap) {
+                        badge = `
+                            <div class="combined-badge">
+                                <i class="fas fa-mouse-pointer"></i>
+                                Interactive
+                            </div>
+                        `;
+                    } else if (isCellTypeUmap) {
+                        badge = `
+                            <div class="combined-badge">
+                                <i class="fas fa-mouse-pointer"></i>
+                                Interactive
+                            </div>
+                        `;
+                    }
                     
                     grid += `
                         <div class="image-item">
@@ -875,6 +966,37 @@ class HCAAtlasApp {
         document.body.style.overflow = 'hidden';
     }
 
+    openCellTypeUmapModal(imageSrc, title, subtitle) {
+        const modal = document.getElementById('image-modal');
+        const modalTitle = document.getElementById('image-modal-title');
+        const modalSubtitle = document.getElementById('image-modal-subtitle');
+        const modalBody = modal.querySelector('.image-modal-body');
+        
+        // Remove any previous classes
+        modalBody.classList.remove('combined-content');
+        
+        // Get interactive path for current node
+        const nodeName = this.currentNode;
+        const interactivePath = `/api/interactive-plot/${nodeName}/umap_cell_type`;
+        
+        // Show just the interactive cell type UMAP
+        modalBody.innerHTML = `
+            <div style="width: 100%; height: 80vh; display: flex; justify-content: center; align-items: center;">
+                <iframe 
+                    src="${interactivePath}" 
+                    style="width: 100%; height: 100%; border: none; border-radius: 8px;"
+                    title="Interactive UMAP - Cell Types">
+                </iframe>
+            </div>
+        `;
+        
+        modalTitle.textContent = title + ' (Interactive)';
+        modalSubtitle.textContent = subtitle;
+        
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
     closeImageModal() {
         const modal = document.getElementById('image-modal');
         const modalBody = modal.querySelector('.image-modal-body');
@@ -915,9 +1037,9 @@ class HCAAtlasApp {
                         </div>
                         <div class="program-summary">${this.createDataOverviewInline(nodeInfo)}</div>
                     </div>
-                    <i class="fas fa-chevron-down expand-icon"></i>
+                    <i class="fas fa-chevron-up expand-icon expanded"></i>
                 </div>
-                <div class="program-content">
+                <div class="program-content expanded">
                     ${this.currentNodeSummary ? this.createNodeSummaryContent(this.currentNodeSummary) : ''}
                     ${this.createRemainingNodeInfoSections(nodeInfo)}
                 </div>
@@ -961,7 +1083,80 @@ class HCAAtlasApp {
         
         let content = '';
         
-        // Add program labels first if available
+        // Add summary heatmaps first, in the specified order, without dropdown
+        if (Object.keys(figures).length > 0) {
+            content += `<div class="summary-heatmaps-section" style="margin: 2rem 0;">`;
+            content += `<h4 style="text-align: center; margin-bottom: 1.5rem;">Summary Heatmaps</h4>`;
+            content += `<div class="heatmap-display-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; justify-items: center;">`;
+            
+            // Define the desired order of heatmaps
+            const heatmapOrder = [
+                'cluster_by_cell_type_heatmap',
+                'cell_type_by_program_activity_heatmap', 
+                'leiden_cluster_by_program_activity_heatmap'
+            ];
+            
+            heatmapOrder.forEach(figureName => {
+                if (figures[figureName]) {
+                    const displayName = figureName
+                        .replace(/_/g, ' ')
+                        .replace(/\b\w/g, l => l.toUpperCase());
+                        
+                    content += `
+                        <div class="heatmap-display-item" style="max-width: 500px; width: 100%;">
+                            <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
+                                <div class="image-title">${displayName}</div>
+                                <div class="image-subtitle">Node Summary</div>
+                            </div>
+                            <div class="image-container" 
+                                 data-image-src="/api/node-summary-image/${summaryData.node_name}/${figureName}.png?compress=true&quality=95&max_width=2000" 
+                                 data-image-title="${displayName}"
+                                 data-image-subtitle="Node Summary"
+                                 style="display: flex; justify-content: center;">
+                                <img src="/api/node-summary-image/${summaryData.node_name}/${figureName}.png?compress=true&quality=85&max_width=500" 
+                                     alt="${displayName}" 
+                                     loading="lazy"
+                                     onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Image not available</div>'"
+                                     onload="this.style.opacity=1" 
+                                     style="opacity:0;transition:opacity 0.3s;cursor:pointer; width: 100%; height: auto; max-width: 500px; border: 1px solid #ddd; border-radius: 8px;">
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            content += `</div></div>`;
+        }
+        
+        // Add combined UMAP comparison after heatmaps
+        if (this.currentNodeInfo && this.currentNodeInfo.overview_figures && 
+            this.currentNodeInfo.overview_figures.program_umap_cell_type && 
+            this.currentNodeInfo.overview_figures.program_umap_leiden) {
+            const nodeName = summaryData.node_name;
+            const thumbnailPath = `/api/node-summary-image/${nodeName}/umap_cell_type.png?compress=true&quality=75&max_width=400`;
+            
+            content += `
+                <div style="margin: 2rem 0; display: flex; justify-content: center;">
+                    <div class="image-item" style="max-width: 800px; width: 100%;">
+                        <div class="image-header" style="text-align: center;">
+                            <div class="image-title">UMAP Comparison - Leiden vs Cell Type</div>
+                            <div class="image-subtitle">combined_umap_comparison</div>
+                        </div>
+                        <div class="image-container combined-umap" data-node-name="${nodeName}" data-image-title="UMAP Comparison - Leiden vs Cell Type" data-image-subtitle="combined_umap_comparison" style="display: flex; justify-content: center; position: relative;">
+                            <img src="${thumbnailPath}" alt="UMAP Comparison - Leiden vs Cell Type" loading="lazy"
+                                 onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Image not available</div>'"
+                                 onload="this.style.opacity=1" style="opacity:0;transition:opacity 0.3s;cursor:pointer; width: 100%; height: auto; max-width: 800px;">
+                            <div class="combined-badge">
+                                <i class="fas fa-mouse-pointer"></i>
+                                Interactive
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Add program labels if available
         if (Object.keys(programLabels).length > 0) {
             content += '<div class="program-labels-section">';
             content += '<h4>Program Labels</h4>';
@@ -1012,74 +1207,7 @@ class HCAAtlasApp {
                 `;
             }
             
-            // Add combined UMAP comparison right after correlation heatmap
-            if (this.currentNodeInfo && this.currentNodeInfo.overview_figures && 
-                this.currentNodeInfo.overview_figures.program_umap_cell_type && 
-                this.currentNodeInfo.overview_figures.program_umap_leiden) {
-                const nodeName = summaryData.node_name;
-                const thumbnailPath = `/api/node-summary-image/${nodeName}/umap_cell_type.png?compress=true&quality=75&max_width=400`;
-                
-                content += `
-                    <div style="margin: 2rem 0; display: flex; justify-content: center;">
-                        <div class="image-item" style="max-width: 800px; width: 100%;">
-                            <div class="image-header" style="text-align: center;">
-                                <div class="image-title">UMAP Comparison - Leiden vs Cell Type</div>
-                                <div class="image-subtitle">combined_umap_comparison</div>
-                            </div>
-                            <div class="image-container combined-umap" data-node-name="${nodeName}" data-image-title="UMAP Comparison - Leiden vs Cell Type" data-image-subtitle="combined_umap_comparison" style="display: flex; justify-content: center; position: relative;">
-                                <img src="${thumbnailPath}" alt="UMAP Comparison - Leiden vs Cell Type" loading="lazy"
-                                     onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Image not available</div>'"
-                                     onload="this.style.opacity=1" style="opacity:0;transition:opacity 0.3s;cursor:pointer; width: 100%; height: auto; max-width: 800px;">
-                                <div class="combined-badge">
-                                    <i class="fas fa-columns"></i>
-                                    Comparison
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
-            
             content += '</div>';
-        }
-        
-        // Add heatmap figures if available (collapsed by default)
-        if (Object.keys(figures).length > 0) {
-            content += `
-                <div class="section">
-                    <div class="section-header" data-section="heatmaps" data-program="node-summary">
-                        <h4>Summary Heatmaps</h4>
-                        <i class="fas fa-chevron-down expand-icon"></i>
-                    </div>
-                    <div class="section-content" style="display: none;">
-                        <div class="heatmap-grid">
-            `;
-            
-            Object.entries(figures).forEach(([figureName, figurePath]) => {
-                const displayName = figureName
-                    .replace(/_/g, ' ')
-                    .replace(/\b\w/g, l => l.toUpperCase());
-                    
-                content += `
-                    <div class="heatmap-item" 
-                         data-image-src="${figurePath}" 
-                         data-image-title="${displayName}"
-                         data-image-subtitle="Node Summary">
-                        <img src="/api/node-summary-image/${summaryData.node_name}/${figureName}.png?compress=true&quality=85&max_width=400" 
-                             alt="${displayName}" 
-                             onerror="this.style.display='none'"
-                             onload="this.style.opacity=1" 
-                             style="opacity:0;transition:opacity 0.3s">
-                        <div class="heatmap-title">${displayName}</div>
-                    </div>
-                `;
-            });
-            
-            content += `
-                        </div>
-                    </div>
-                </div>
-            `;
         }
         
         return content;
@@ -1151,11 +1279,9 @@ class HCAAtlasApp {
             if (cells.number) {
                 content += `<p><strong>Count:</strong> ${cells.number.toLocaleString()}</p>`;
             }
-            if (cells.prelabeled_clusters) {
+            if (cells.prelabeled_clusters && cells.prelabeled_clusters.cell_type) {
                 content += '<p><strong>Prelabeled Clusters:</strong></p><ul>';
-                Object.entries(cells.prelabeled_clusters).forEach(([key, value]) => {
-                    content += `<li>${key}: ${value} unique values</li>`;
-                });
+                content += `<li>cell_type: ${cells.prelabeled_clusters.cell_type} unique values</li>`;
                 content += '</ul>';
             }
             

@@ -87,6 +87,9 @@ def get_node_programs(node_name):
                 else:
                     summary = description[:200] + ('...' if len(description) > 200 else '')
         
+        # Extract program number for per-program heatmaps
+        program_num = prog_name.replace('program_', '')
+        
         program_summaries[prog_name] = {
             'total_genes': prog_data.get('total_genes', 0),
             'summary': summary,
@@ -94,10 +97,13 @@ def get_node_programs(node_name):
             'has_genes': bool(prog_data.get('genes')),
             'has_loadings': bool(prog_data.get('loadings')),
             'images': {
-                'program_violins_cell_type': prog_data.get('program_violins_cell_type'),
-                'program_violins_leiden': prog_data.get('program_violins_leiden'),
                 'program_umap_leiden': prog_data.get('program_umap_leiden'),
-                'program_umap_activity': prog_data.get('program_umap_activity')
+                'program_umap_activity': prog_data.get('program_umap_activity'),
+                'program_umap_cell_type': node_data.get('node_info', {}).get('overview_figures', {}).get('program_umap_cell_type')
+            },
+            'heatmaps': {
+                'cell_type_by_program_activity': f'/api/node-summary-image/{node_name}/cell_type_by_program_activity_program_{program_num}.png',
+                'leiden_cluster_by_program_activity': f'/api/node-summary-image/{node_name}/leiden_cluster_by_program_activity_program_{program_num}.png'
             }
         }
     
