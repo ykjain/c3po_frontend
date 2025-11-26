@@ -6,10 +6,11 @@ Serves program data with lazy loading endpoints.
 
 import json
 import os
-from flask import Flask, render_template, jsonify, request, send_from_directory, Response
+from flask import Flask, render_template, jsonify, request, send_from_directory, Response, session, redirect, url_for
 from flask_cors import CORS
 from PIL import Image
 import io
+from functools import wraps
 
 # Import chat module
 try:
@@ -21,7 +22,20 @@ except ImportError as e:
     chat_bp = None
 
 app = Flask(__name__)
+app.secret_key = 'hca-lung-atlas-secret-key-change-in-production'
 CORS(app)
+
+# Password protection settings
+PASSCODE = '182638'
+
+def login_required(f):
+    """Decorator to require login for protected routes."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('authenticated'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Register chat blueprint if available
 if CHAT_AVAILABLE and chat_bp:
@@ -38,19 +52,50 @@ def load_data():
     """Load program data and tree structure on startup."""
     global programs_data, tree_structure
     
-    # Load programs data
-    programs_file = '/mnt/vdd/hca_lung_atlas_tree/display/programs.json'
+    # Load programs data (generated from c3po_outputs)
+    programs_file = '/home/ubuntu/display/programs.json'
     if os.path.exists(programs_file):
         with open(programs_file, 'r') as f:
             programs_data = json.load(f)
+        print(f"✓ Loaded programs data from {programs_file}")
+    else:
+        print(f"⚠ Warning: programs.json not found at {programs_file}")
+        print("  Run: cd /home/ubuntu/c3po_display && uv run python generate_display_metadata.py")
     
-    # Load tree structure
-    tree_file = '/mnt/vdd/hca_lung_atlas_tree/test_setup/tree.json'
+    # Load tree structure (generated from c3po_outputs)
+    tree_file = '/home/ubuntu/display/tree.json'
     if os.path.exists(tree_file):
         with open(tree_file, 'r') as f:
             tree_structure = json.load(f)
+        print(f"✓ Loaded tree structure from {tree_file}")
+    else:
+        print(f"⚠ Warning: tree.json not found at {tree_file}")
+        print("  Run: cd /home/ubuntu/c3po_display && uv run python generate_display_metadata.py")
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page and handler."""
+    if session.get('authenticated'):
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        password = request.form.get('password')
+        if password == PASSCODE:
+            session['authenticated'] = True
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', error='Invalid access code. Please try again.')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """Logout handler."""
+    session.pop('authenticated', None)
+    return redirect(url_for('login'))
 
 @app.route('/')
+@login_required
 def index():
     """Serve the main page."""
     return render_template('index.html')
@@ -87,8 +132,9 @@ def get_node_programs(node_name):
                 else:
                     summary = description[:200] + ('...' if len(description) > 200 else '')
         
-        # Extract program number for per-program heatmaps
-        program_num = prog_name.replace('program_', '')
+        # Extract program number (0-based) and convert to 1-based for new outputs
+        program_num_0based = prog_name.replace('program_', '')
+        program_num_1based = int(program_num_0based) + 1
         
         program_summaries[prog_name] = {
             'total_genes': prog_data.get('total_genes', 0),
@@ -97,13 +143,13 @@ def get_node_programs(node_name):
             'has_genes': bool(prog_data.get('genes')),
             'has_loadings': bool(prog_data.get('loadings')),
             'images': {
-                'program_umap_leiden': prog_data.get('program_umap_leiden'),
-                'program_umap_activity': prog_data.get('program_umap_activity'),
-                'program_umap_cell_type': node_data.get('node_info', {}).get('overview_figures', {}).get('program_umap_cell_type')
+                'program_umap_leiden': f'/api/node-summary-image/{node_name}/program_umaps/program_{program_num_1based}.png',
+                'program_umap_activity': f'/api/node-summary-image/{node_name}/program_umaps/program_{program_num_1based}.png',
+                'program_umap_cell_type': f'/api/node-summary-image/{node_name}/umap_by_cell_type.png'
             },
             'heatmaps': {
-                'cell_type_by_program_activity': f'/api/node-summary-image/{node_name}/cell_type_by_program_activity_program_{program_num}.png',
-                'leiden_cluster_by_program_activity': f'/api/node-summary-image/{node_name}/leiden_cluster_by_program_activity_program_{program_num}.png'
+                'cell_type_by_program_activity': f'/api/node-summary-image/{node_name}/per_program_heatmaps/program_{program_num_1based}_breakdown.png',
+                'leiden_cluster_by_program_activity': f'/api/node-summary-image/{node_name}/per_program_heatmaps/program_{program_num_1based}_breakdown.png'
             }
         }
     
@@ -221,26 +267,28 @@ def serve_images(filepath):
 @app.route('/api/node/<node_name>/summary')
 def get_node_summary(node_name):
     """Get node summary figures and program labels."""
-    summary_base_path = '/home/ubuntu/hca_lung_atlas_files/node_summary_figures'
+    # Updated path for new c3po_outputs structure
+    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
     
-    # Check if directory exists for this node
-    node_summary_path = os.path.join(summary_base_path, node_name)
+    # Check if directory exists for this node (with _display_figures suffix)
+    node_summary_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
     if not os.path.exists(node_summary_path):
         return jsonify({'error': 'Node summary not found'}), 404
     
-    # Get the three heatmap images
+    # Get the heatmap files (PNG)
     figures = {}
-    figure_files = [
-        'cell_type_by_program_activity_heatmap.png',
-        'cluster_by_cell_type_heatmap.png', 
-        'leiden_cluster_by_program_activity_heatmap.png'
-    ]
+    figure_mapping = {
+        'cell_type_by_program_activity_heatmap': 'heatmap_programs_by_cell_type.png',
+        'heatmap_celltype_leiden_composition': 'heatmap_celltype_leiden_composition.png',
+        'cluster_by_cell_type_heatmap': 'cluster_by_cell_type_heatmap.png',  # Not generated by new pipeline
+        'leiden_cluster_by_program_activity_heatmap': 'heatmap_programs_by_leiden.png'
+    }
     
-    for fig_file in figure_files:
-        fig_path = os.path.join(node_summary_path, fig_file)
+    for key, filename in figure_mapping.items():
+        fig_path = os.path.join(node_summary_path, filename)
         if os.path.exists(fig_path):
             # Use relative path for serving
-            figures[fig_file.replace('.png', '')] = f'/api/node-summary-image/{node_name}/{fig_file}'
+            figures[key] = f'/api/node-summary-image/{node_name}/{filename}'
     
     # Get program labels
     labels_path = os.path.join(node_summary_path, 'program_labels.json')
@@ -248,7 +296,12 @@ def get_node_summary(node_name):
     if os.path.exists(labels_path):
         try:
             with open(labels_path, 'r', encoding='utf-8') as f:
-                program_labels = json.load(f)
+                raw_labels = json.load(f)
+                # Transform keys from "program_0" to "0" for frontend compatibility
+                for key, value in raw_labels.items():
+                    if key.startswith('program_'):
+                        prog_num = key.replace('program_', '')
+                        program_labels[prog_num] = value
         except Exception as e:
             print(f"Error loading program labels for {node_name}: {e}")
     
@@ -276,37 +329,79 @@ def get_node_summary(node_name):
             if total_genes:
                 program_gene_counts[prog_num] = total_genes
     
+    # Check for additional UMAP files
+    umap_files = {}
+    umap_by_cell_type_png = os.path.join(node_summary_path, 'umap_by_cell_type.png')
+    umap_by_cell_type_html = os.path.join(node_summary_path, 'umap_by_cell_type.html')
+    umap_by_leiden_png = os.path.join(node_summary_path, 'umap_by_leiden.png')
+    umap_by_leiden_html = os.path.join(node_summary_path, 'umap_by_leiden.html')
+    
+    if os.path.exists(umap_by_cell_type_png):
+        umap_files['umap_by_cell_type_png'] = f'/api/node-summary-image/{node_name}/umap_by_cell_type.png'
+    if os.path.exists(umap_by_cell_type_html):
+        umap_files['umap_by_cell_type_html'] = f'/api/node-summary-html/{node_name}/umap_by_cell_type.html'
+    if os.path.exists(umap_by_leiden_png):
+        umap_files['umap_by_leiden_png'] = f'/api/node-summary-image/{node_name}/umap_by_leiden.png'
+    if os.path.exists(umap_by_leiden_html):
+        umap_files['umap_by_leiden_html'] = f'/api/node-summary-html/{node_name}/umap_by_leiden.html'
+    
     return jsonify({
         'node_name': node_name,
         'figures': figures,
         'program_labels': program_labels,
         'program_gene_counts': program_gene_counts,
-        'cell_type_counts': cell_type_counts
+        'cell_type_counts': cell_type_counts,
+        'umap_files': umap_files
     })
 
-@app.route('/api/node-summary-image/<node_name>/<filename>')
-def serve_node_summary_image(node_name, filename):
-    """Serve node summary images."""
-    summary_base_path = '/home/ubuntu/hca_lung_atlas_files/node_summary_figures'
-    node_path = os.path.join(summary_base_path, node_name)
+@app.route('/api/node-summary-image/<node_name>/<path:filepath>')
+def serve_node_summary_image(node_name, filepath):
+    """Serve node summary images (PNG files)."""
+    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    node_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
     
     if not os.path.exists(node_path):
         return "Node not found", 404
     
-    return send_from_directory(node_path, filename)
+    file_path = os.path.join(node_path, filepath)
+    if not os.path.exists(file_path):
+        return "File not found", 404
+    
+    # Serve image files
+    directory = os.path.dirname(file_path)
+    filename = os.path.basename(file_path)
+    return send_from_directory(directory, filename)
+
+@app.route('/api/node-summary-html/<node_name>/<path:filepath>')
+def serve_node_summary_html(node_name, filepath):
+    """Serve node summary HTML files (new Plotly outputs)."""
+    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    node_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
+    
+    if not os.path.exists(node_path):
+        return "Node not found", 404
+    
+    file_path = os.path.join(node_path, filepath)
+    if not os.path.exists(file_path):
+        return "File not found", 404
+    
+    # Serve HTML files
+    directory = os.path.dirname(file_path)
+    filename = os.path.basename(file_path)
+    return send_from_directory(directory, filename, mimetype='text/html')
 
 @app.route('/api/interactive-plot/<node_name>/<plot_name>')
 def serve_interactive_plot(node_name, plot_name):
-    """Serve interactive Plotly HTML files."""
-    summary_base_path = '/home/ubuntu/hca_lung_atlas_files/node_summary_figures'
-    node_summary_path = os.path.join(summary_base_path, node_name)
+    """Serve static PNG plot files."""
+    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    node_summary_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
     
     if not os.path.exists(node_summary_path):
         return jsonify({'error': 'Node not found'}), 404
     
-    # Map plot names to actual file names
+    # Map plot names to actual file names (PNG versions)
     plot_files = {
-        'umap_cell_type': 'umap_cell_type.html'
+        'umap_cell_type': 'umap_by_cell_type.png'  # PNG instead of HTML
     }
     
     if plot_name not in plot_files:
@@ -316,7 +411,65 @@ def serve_interactive_plot(node_name, plot_name):
     if not os.path.exists(file_path):
         return jsonify({'error': 'Plot file not found'}), 404
     
-    return send_from_directory(node_summary_path, plot_files[plot_name], mimetype='text/html')
+    return send_from_directory(node_summary_path, plot_files[plot_name])
+
+@app.route('/api/node/<node_name>/leiden-clusters')
+def get_leiden_clusters(node_name):
+    """Get leiden cluster labels and biological summaries for a node."""
+    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    node_summary_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
+    
+    if not os.path.exists(node_summary_path):
+        return jsonify({'error': 'Node not found'}), 404
+    
+    # Load cluster labels
+    labels_path = os.path.join(node_summary_path, 'leiden_cluster_labels.json')
+    cluster_labels = {}
+    if os.path.exists(labels_path):
+        try:
+            with open(labels_path, 'r', encoding='utf-8') as f:
+                cluster_labels = json.load(f)
+        except Exception as e:
+            print(f"Error loading leiden cluster labels for {node_name}: {e}")
+    
+    # Load biological summaries for each cluster
+    cluster_reports_path = os.path.join(node_summary_path, 'leiden_cluster_reports')
+    cluster_summaries = {}
+    
+    if os.path.exists(cluster_reports_path):
+        for cluster_key in cluster_labels.keys():
+            # Extract cluster number from key (e.g., 'cluster_0' -> '0')
+            cluster_num = cluster_key.replace('cluster_', '')
+            summary_file = os.path.join(cluster_reports_path, f'cluster_{cluster_num}_biological_summary.txt')
+            
+            if os.path.exists(summary_file):
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        cluster_summaries[cluster_key] = f.read().strip()
+                except Exception as e:
+                    print(f"Error loading biological summary for {cluster_key}: {e}")
+    
+    # Load cluster metadata (cell types and counts) from precomputed JSON
+    metadata_path = os.path.join(node_summary_path, 'leiden_cluster_metadata.json')
+    cluster_cell_types = {}
+    cluster_cell_counts = {}
+    
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+                cluster_cell_types = metadata.get('cluster_cell_types', {})
+                cluster_cell_counts = metadata.get('cluster_cell_counts', {})
+        except Exception as e:
+            print(f"Error loading cluster metadata for {node_name}: {e}")
+    
+    return jsonify({
+        'node_name': node_name,
+        'cluster_labels': cluster_labels,
+        'cluster_summaries': cluster_summaries,
+        'cluster_cell_types': cluster_cell_types,
+        'cluster_cell_counts': cluster_cell_counts
+    })
 
 @app.route('/api/stats')
 def get_stats():

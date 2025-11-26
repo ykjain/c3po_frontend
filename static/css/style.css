@@ -138,12 +138,18 @@ body {
 .tree-expand-icon {
     margin-right: 0.5rem;
     width: 12px;
-    transition: transform 0.2s ease;
     cursor: pointer;
 }
 
-.tree-expand-icon.fa-chevron-down {
-    transform: rotate(90deg);
+.tree-leaf-icon {
+    margin-right: 0.5rem;
+    width: 12px;
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+.tree-leaf-icon.fa-chevron-down {
+    opacity: 1;
 }
 
 .tree-node-content {
@@ -240,7 +246,13 @@ body {
     padding-left: 1rem;
 }
 
-.tree-child {
+.tree-child-container {
+    margin-bottom: 0.25rem;
+}
+
+.tree-child-header {
+    display: flex;
+    align-items: center;
     padding: 0.5rem 0.75rem;
     cursor: pointer;
     border-radius: 4px;
@@ -249,13 +261,17 @@ body {
     color: var(--text-secondary);
 }
 
-.tree-child:hover {
+.tree-child-header:hover {
     background-color: var(--hover-color);
     color: var(--text-primary);
 }
 
-.tree-child.active {
+.tree-child-header.active {
     background-color: var(--accent-color);
+    color: white;
+}
+
+.tree-child-header.active i {
     color: white;
 }
 
@@ -427,12 +443,7 @@ body {
 }
 
 .expand-icon {
-    transition: transform 0.2s ease;
     color: var(--text-secondary);
-}
-
-.expand-icon.expanded {
-    transform: rotate(180deg);
 }
 
 .program-content {
@@ -1020,12 +1031,12 @@ body {
 
 .image-modal-body {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     flex: 1;
     min-height: 0;
     padding: 1.5rem;
-    overflow: hidden;
+    overflow: auto;
 }
 
 .image-modal-body.interactive-content {
@@ -1040,7 +1051,7 @@ body {
 
 .image-modal-body img {
     max-width: 98%;
-    max-height: 98%;
+    max-height: none;
     width: auto;
     height: auto;
     object-fit: contain;
@@ -1231,4 +1242,155 @@ li {
 .umap-panel iframe {
     flex: 1;
     min-height: 0;
+}
+
+/* Iframe container styles for new Plotly HTML outputs */
+.iframe-container {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 8px;
+    background-color: white;
+}
+
+.iframe-container iframe {
+    display: block;
+    width: 100%;
+    border: none;
+    background-color: white;
+}
+
+/* Loading state for iframes */
+.iframe-container::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 1;
+}
+
+.iframe-container iframe[style*="opacity:0"]::before,
+.iframe-container iframe:not([style*="opacity:1"])::before {
+    opacity: 1;
+}
+
+@keyframes spin {
+    0% { transform: translate(-50%, -50%) rotate(0deg); }
+    100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* Ensure iframes in program sections are sized appropriately */
+.program-heatmaps-section iframe {
+    min-height: 600px;
+}
+
+.heatmap-display-item iframe {
+    min-height: 500px;
+}
+
+/* Make sure "No image found" messages are styled */
+.image-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: var(--text-secondary);
+    font-style: italic;
+    background-color: var(--hover-color);
+    border-radius: 8px;
+}
+
+/* Hide loading indicator when iframe is loaded */
+.iframe-container iframe[src] + .image-loading,
+.iframe-container .iframe-loaded + .image-loading {
+    display: none;
+}
+
+/* Show loading indicator for lazy iframes */
+.iframe-container iframe:not([src]) {
+    display: none;
+}
+
+.iframe-container iframe[src] {
+    display: block;
+}
+
+/* Cell Clusters Section Styles */
+.cluster-dropdowns-container {
+    padding: 1rem;
+}
+
+.cluster-dropdown-item {
+    margin-bottom: 0.5rem;
+}
+
+.cluster-dropdown-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.875rem 1.25rem;
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.cluster-dropdown-header:hover {
+    background: #f6f8fa;
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    transform: translateY(-1px);
+}
+
+.cluster-dropdown-header > div {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.cluster-dropdown-header span:first-child {
+    font-weight: 600;
+    color: var(--primary-color);
+    min-width: 4rem;
+    font-size: 0.95rem;
+}
+
+.cluster-dropdown-header span:last-child {
+    color: var(--text-color);
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.cluster-expand-icon {
+    color: var(--text-secondary);
+    transition: transform 0.3s ease;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.cluster-dropdown-content {
+    padding: 1.25rem 1.5rem;
+    background: #fafbfc;
+    border: 1px solid #e1e4e8;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    margin-top: -8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.cluster-dropdown-content p {
+    line-height: 1.7;
+    color: #24292e;
+    font-size: 0.95rem;
 }

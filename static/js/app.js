@@ -14,13 +14,33 @@ class HCAAtlasApp {
     // Convert node names from root_cluster_L1C03 format to "Cluster 4" format
     formatNodeName(nodeName) {
         if (nodeName === 'root') {
-            return 'Root';
+            return 'All Cells';
+        }
+        
+        // Match pattern like root_c_1, root_c_10, etc.
+        const rootCMatch = nodeName.match(/root_c_(\d+)/);
+        if (rootCMatch) {
+            const clusterNum = parseInt(rootCMatch[1]);
+            return `Cluster ${clusterNum - 1}`;
+        }
+        
+        // Match pattern for cell type nodes like root_cell_type_Myeloid
+        if (nodeName.startsWith('root_cell_type_')) {
+            return nodeName.replace('root_cell_type_', '');
+        }
+        
+        // Match pattern for third-level nodes like root_cluster_L1C00_cluster_L2C01
+        const thirdLevelMatch = nodeName.match(/root_cluster_L1C(\d+)_cluster_L2C(\d+)/);
+        if (thirdLevelMatch) {
+            const l1ClusterNum = parseInt(thirdLevelMatch[1]);
+            const l2ClusterNum = parseInt(thirdLevelMatch[2]);
+            return `L${l1ClusterNum + 1}C${l2ClusterNum}`;
         }
         
         // Match pattern like root_cluster_L1C03 and extract the number
-        const match = nodeName.match(/root_cluster_L1C(\d+)/);
-        if (match) {
-            const clusterNum = parseInt(match[1]);
+        const secondLevelMatch = nodeName.match(/root_cluster_L1C(\d+)/);
+        if (secondLevelMatch) {
+            const clusterNum = parseInt(secondLevelMatch[1]);
             return `Cluster ${clusterNum + 1}`; // Add 1 since L1C00 should be Cluster 1
         }
         
@@ -32,6 +52,9 @@ class HCAAtlasApp {
         await this.loadStats();
         await this.loadTree();
         this.bindEvents();
+        
+        // Automatically load the "All Cells" (root) node on page load
+        await this.selectNodeAndExpand('root');
     }
 
     async loadStats() {
@@ -62,46 +85,65 @@ class HCAAtlasApp {
 
     renderTree(tree) {
         const container = document.getElementById('tree-content');
+        container.appendChild(this.createTreeNode(tree, 0));
+    }
+
+    createTreeNode(node, level) {
+        const hasChildren = node.children && node.children.length > 0;
+        const isRoot = level === 0;
         
-        // Root node
-        const rootNode = document.createElement('div');
-        rootNode.className = 'tree-node';
-        rootNode.innerHTML = `
-            <div class="tree-node-header" data-node="${tree.name}">
-                <i class="fas fa-chevron-right tree-expand-icon"></i>
-                <i class="fas fa-folder tree-node-icon"></i>
-                <span>${this.formatNodeName(tree.name)}</span>
+        const nodeElement = document.createElement('div');
+        nodeElement.className = isRoot ? 'tree-node' : 'tree-child-container';
+        
+        const headerClass = isRoot ? 'tree-node-header' : 'tree-child-header';
+        const iconClass = hasChildren ? 'fas fa-folder' : 'fas fa-file-alt';
+        
+        nodeElement.innerHTML = `
+            <div class="${headerClass}" data-node="${node.name}" style="cursor: pointer;">
+                ${hasChildren ? '<i class="fas fa-chevron-right tree-expand-icon"></i>' : '<i class="fas fa-chevron-right tree-leaf-icon"></i>'}
+                <i class="${iconClass} tree-node-icon"></i>
+                <span>${this.formatNodeName(node.name)}</span>
             </div>
-            <div class="tree-node-content" id="tree-content-${tree.name}" style="display: none;"></div>
+            <div class="tree-node-content" id="tree-content-${node.name}" style="display: none;"></div>
         `;
         
-        // Children
-        if (tree.children && tree.children.length > 0) {
+        // Add direct click handler for debugging
+        const header = nodeElement.querySelector(`.${headerClass}`);
+        header.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.selectNodeAndExpand(node.name);
+        });
+        
+        // Recursively add children
+        if (hasChildren) {
             const childrenContainer = document.createElement('div');
             childrenContainer.className = 'tree-children';
             
-            tree.children.forEach(child => {
-                const childNode = document.createElement('div');
-                childNode.className = 'tree-child';
-                childNode.innerHTML = `
-                    <div class="tree-child-header" data-node="${child.name}">
-                        <i class="fas fa-chevron-right tree-expand-icon"></i>
-                        <i class="fas fa-file-alt tree-node-icon"></i>
-                        <span>${this.formatNodeName(child.name)}</span>
-                    </div>
-                    <div class="tree-node-content" id="tree-content-${child.name}" style="display: none;"></div>
-                `;
-                childrenContainer.appendChild(childNode);
+            // Sort children numerically by cluster number
+            const sortedChildren = [...node.children].sort((a, b) => {
+                // Extract numbers from node names like root_c_1, root_c_10, etc.
+                const aMatch = a.name.match(/root_c_(\d+)/);
+                const bMatch = b.name.match(/root_c_(\d+)/);
+                
+                if (aMatch && bMatch) {
+                    return parseInt(aMatch[1]) - parseInt(bMatch[1]);
+                }
+                
+                // Fallback to alphabetical if pattern doesn't match
+                return a.name.localeCompare(b.name);
             });
             
-            rootNode.appendChild(childrenContainer);
+            sortedChildren.forEach(child => {
+                childrenContainer.appendChild(this.createTreeNode(child, level + 1));
+            });
+            
+            nodeElement.appendChild(childrenContainer);
         }
-        
-        container.appendChild(rootNode);
+        return nodeElement;
     }
 
     bindEvents() {
-        // Tree node clicks
+        // Tree node clicks (fallback for global handling)
         document.addEventListener('click', (e) => {
             const nodeHeader = e.target.closest('.tree-node-header, .tree-child-header');
             if (nodeHeader) {
@@ -123,6 +165,13 @@ class HCAAtlasApp {
                 this.toggleSection(sectionHeader);
             }
 
+            // Cluster dropdown header clicks
+            const clusterHeader = e.target.closest('.cluster-dropdown-header');
+            if (clusterHeader) {
+                this.toggleClusterDropdown(clusterHeader);
+                e.stopPropagation();
+            }
+
             // Program label clicks (scroll to and expand program)
             const programLabel = e.target.closest('.clickable-program-label');
             if (programLabel) {
@@ -135,8 +184,27 @@ class HCAAtlasApp {
             // Image container clicks (for modal) - includes both .image-container and .heatmap-item
             const imageContainer = e.target.closest('.image-container, .heatmap-item');
             if (imageContainer) {
+                // Check if this is a dual UMAP (program activity + cell type)
+                if (imageContainer.classList.contains('program-umap-dual')) {
+                    const activityPath = imageContainer.dataset.umapActivityPath;
+                    const cellTypePath = imageContainer.dataset.umapCellTypePath;
+                    const title = imageContainer.dataset.imageTitle;
+                    this.openDualUmapModal(activityPath, cellTypePath, title);
+                }
+                // Check if this is a cell type UMAP modal
+                else if (imageContainer.classList.contains('cell-type-umap-modal')) {
+                    const htmlPath = imageContainer.dataset.umapHtmlPath;
+                    const title = imageContainer.dataset.imageTitle;
+                    this.openSingleUmapModal(htmlPath, title);
+                }
+                // Check if this is a leiden UMAP modal
+                else if (imageContainer.classList.contains('leiden-umap-modal')) {
+                    const htmlPath = imageContainer.dataset.umapHtmlPath;
+                    const title = imageContainer.dataset.imageTitle;
+                    this.openSingleUmapModal(htmlPath, title);
+                }
                 // Check if this is a combined UMAP
-                if (imageContainer.classList.contains('combined-umap') && imageContainer.dataset.nodeName) {
+                else if (imageContainer.classList.contains('combined-umap') && imageContainer.dataset.nodeName) {
                     this.openCombinedUmapModal(
                         imageContainer.dataset.nodeName,
                         imageContainer.dataset.imageTitle,
@@ -185,10 +253,15 @@ class HCAAtlasApp {
         const nodeContentDiv = document.getElementById(`tree-content-${nodeName}`);
         const expandIcon = document.querySelector(`[data-node="${nodeName}"] .tree-expand-icon`);
         
+        // Check if this node has an expand icon (i.e., has children)
+        const hasExpandIcon = expandIcon !== null;
+        
         if (nodeContentDiv.style.display === 'none') {
-            // Expand: Load and show node data in sidebar
-            expandIcon.classList.remove('fa-chevron-right');
-            expandIcon.classList.add('fa-chevron-down');
+            // Expand: Update icon if it exists
+            if (hasExpandIcon) {
+                expandIcon.classList.remove('fa-chevron-right');
+                expandIcon.classList.add('fa-chevron-down');
+            }
             
             try {
                 const response = await fetch(`/api/node/${nodeName}`);
@@ -205,9 +278,11 @@ class HCAAtlasApp {
                 nodeContentDiv.style.display = 'block';
             }
         } else {
-            // Collapse
-            expandIcon.classList.remove('fa-chevron-down');
-            expandIcon.classList.add('fa-chevron-right');
+            // Collapse: Update icon if it exists
+            if (hasExpandIcon) {
+                expandIcon.classList.remove('fa-chevron-down');
+                expandIcon.classList.add('fa-chevron-right');
+            }
             nodeContentDiv.style.display = 'none';
         }
     }
@@ -253,6 +328,12 @@ class HCAAtlasApp {
             }
         });
         
+        // Reset all leaf node chevrons to point right
+        document.querySelectorAll('.tree-leaf-icon').forEach(leafIcon => {
+            leafIcon.classList.remove('fa-chevron-down');
+            leafIcon.classList.add('fa-chevron-right');
+        });
+        
         // Then expand/toggle the current node's sidebar
         await this.toggleTreeNode(nodeName);
         
@@ -265,7 +346,17 @@ class HCAAtlasApp {
         document.querySelectorAll('.tree-node-header, .tree-child-header').forEach(el => {
             el.classList.remove('active');
         });
-        document.querySelector(`[data-node="${nodeName}"]`).classList.add('active');
+        const activeHeader = document.querySelector(`[data-node="${nodeName}"]`);
+        if (activeHeader) {
+            activeHeader.classList.add('active');
+            
+            // Update leaf node chevron to point down if this is a leaf node
+            const leafIcon = activeHeader.querySelector('.tree-leaf-icon');
+            if (leafIcon) {
+                leafIcon.classList.remove('fa-chevron-right');
+                leafIcon.classList.add('fa-chevron-down');
+            }
+        }
 
         // Show loading if we don't have data yet
         if (!nodeData) {
@@ -297,8 +388,7 @@ class HCAAtlasApp {
 
     async renderNodeContent(nodeData) {
         document.getElementById('node-title').textContent = this.formatNodeName(nodeData.node_name);
-        document.getElementById('node-meta').textContent = 
-            `Report: ${nodeData.report_file}`;
+        document.getElementById('node-meta').textContent = '';
         
         // Store node info for use in other methods
         this.currentNodeInfo = nodeData.node_info;
@@ -316,6 +406,9 @@ class HCAAtlasApp {
         
         // Load and render node summary if available (this will update the node info section)
         await this.loadNodeSummary(nodeData.node_name, nodeData);
+        
+        // Load and render cell clusters section
+        await this.loadCellClusters(nodeData.node_name);
         
         const container = document.getElementById('programs-container');
         container.innerHTML = '';
@@ -338,10 +431,12 @@ class HCAAtlasApp {
         card.className = 'program-card';
         card.setAttribute('data-program', programName);
         
-        // Convert program_X to "Program X"
-        const displayName = programName.replace('program_', 'Program ');
+        // Convert program_X to "Program X+1" (1-based indexing for display)
+        const programNumber0Based = parseInt(programName.replace('program_', ''));
+        const programNumber1Based = programNumber0Based + 1;
+        const displayName = `Program ${programNumber1Based}`;
         
-        // Get program label from node summary if available
+        // Get program label from node summary if available (labels use 0-based keys)
         const programNumber = programName.replace('program_', '');
         let programLabel = '';
         if (this.currentNodeSummary && this.currentNodeSummary.program_labels) {
@@ -359,7 +454,7 @@ class HCAAtlasApp {
                             <span class="program-name">${displayName} (${programData.total_genes} genes)${programLabel}</span>
                             <div class="program-stats">
                                 <span class="program-stat">
-                                    <i class="fas fa-chevron-down expand-icon"></i>
+                                    <i class="fas fa-chevron-right expand-icon"></i>
                                 </span>
                             </div>
                         </div>
@@ -387,7 +482,7 @@ class HCAAtlasApp {
                             <i class="fas fa-file-alt"></i>
                             Evidence
                         </span>
-                        <i class="fas fa-chevron-down expand-icon"></i>
+                        <i class="fas fa-chevron-right expand-icon"></i>
                     </div>
                     <div class="section-content" data-section="description">
                         <div class="loading">
@@ -407,7 +502,7 @@ class HCAAtlasApp {
                         <i class="fas fa-images"></i>
                         Visualizations
                     </span>
-                    <i class="fas fa-chevron-down expand-icon"></i>
+                    <i class="fas fa-chevron-right expand-icon"></i>
                 </div>
                 <div class="section-content" data-section="images">
                     ${this.createProgramVisualizations(programData)}
@@ -424,7 +519,7 @@ class HCAAtlasApp {
                             <i class="fas fa-dna"></i>
                             Genes (${programData.total_genes})
                         </span>
-                        <i class="fas fa-chevron-down expand-icon"></i>
+                        <i class="fas fa-chevron-right expand-icon"></i>
                     </div>
                     <div class="section-content" data-section="genes">
                         <div class="loading">
@@ -445,7 +540,7 @@ class HCAAtlasApp {
                             <i class="fas fa-chart-bar"></i>
                             Loadings
                         </span>
-                        <i class="fas fa-chevron-down expand-icon"></i>
+                        <i class="fas fa-chevron-right expand-icon"></i>
                     </div>
                     <div class="section-content" data-section="loadings">
                         <div class="loading">
@@ -476,33 +571,38 @@ class HCAAtlasApp {
                 'leiden_cluster_by_program_activity': 'Leiden Cluster Activity'
             };
             
-            Object.entries(heatmapConfig).forEach(([key, title]) => {
-                if (programData.heatmaps[key]) {
-                    const imagePath = programData.heatmaps[key];
-                    const thumbnailPath = `${imagePath}?compress=true&quality=85&max_width=600`;
-                    const fullPath = `${imagePath}?compress=true&quality=95&max_width=1200`;
-                    
+            // NEW: Handle combined HTML breakdown (cell type + leiden in one file) - lazy-loaded
+            if (programData.heatmaps['cell_type_by_program_activity']) {
+                const breakdownPath = programData.heatmaps['cell_type_by_program_activity'];
+                const isHtmlFile = breakdownPath && (breakdownPath.endsWith('.html') || breakdownPath.includes('/api/node-summary-html/'));
+                
+                if (isHtmlFile) {
                     content += `
-                        <div class="program-heatmap-item" style="max-width: 600px; width: 100%;">
-                            <div class="image-header" style="text-align: center; margin-bottom: 0.5rem;">
-                                <div class="image-title" style="font-size: 0.9rem; font-weight: 500;">${title}</div>
-                            </div>
-                            <div class="image-container" 
-                                 data-image-src="${fullPath}" 
-                                 data-image-title="${title}"
-                                 data-image-subtitle="Program Heatmap"
-                                 style="display: flex; justify-content: center; align-items: center; height: 800px;">
-                                <img src="${thumbnailPath}" 
-                                     alt="${title}" 
-                                     loading="lazy"
-                                     onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Heatmap not available</div>'"
-                                     onload="this.style.opacity=1" 
-                                     style="opacity:0;transition:opacity 0.3s;cursor:pointer; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid #ddd; border-radius: 6px;">
+                        <div style="width: 100%; max-width: 900px; margin: 0 auto; position: relative; min-height: 650px;">
+                            <iframe data-src="${breakdownPath}" 
+                                    style="width:100%; height:650px; border:none; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1);"
+                                    onerror="this.parentElement.innerHTML='<div style=&quot;text-align:center;padding:2rem;&quot;>No breakdown found</div>'">
+                            </iframe>
+                            <div class="image-loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                                <i class="fas fa-spinner fa-pulse"></i> Loading...
                             </div>
                         </div>
                     `;
+                } else {
+                    // Handle PNG breakdown
+                    content += `
+                        <div class="image-container" 
+                             data-image-src="${breakdownPath}" 
+                             data-image-title="Program Breakdown" 
+                             data-image-subtitle="Activity by Cell Type and Leiden Cluster"
+                             style="width: 100%; max-width: 900px; margin: 0 auto; cursor: pointer;">
+                            <img src="${breakdownPath}" alt="Program Breakdown" 
+                                 style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                                 onerror="this.parentElement.innerHTML='<div style=&quot;text-align:center;padding:2rem;color:#999;&quot;>No breakdown found</div>'">
+                        </div>
+                    `;
                 }
-            });
+            }
             
             content += `
                     </div>
@@ -518,9 +618,9 @@ class HCAAtlasApp {
 
     createImagesGrid(images, imageMapping = null, context = null) {
         const defaultImageTypes = {
-            'program_umap_leiden': 'Program UMAP - Leiden',
-            'program_umap_activity': 'Program UMAP - Activity',
-            'program_umap_cell_type': 'Program UMAP - Cell Type'
+            'program_umap_leiden': 'Program UMAP',
+            'program_umap_activity': 'Program UMAP - Activity', 
+            'program_umap_cell_type': 'UMAP - Cell Type'
         };
         
         // Use provided imageMapping or default
@@ -529,6 +629,11 @@ class HCAAtlasApp {
         let grid = '<div class="images-grid">';
         
         Object.entries(images).forEach(([key, path]) => {
+            // Only show program_umap_activity, skip the other UMAP types (they'll be in the modal)
+            if (key === 'program_umap_leiden' || key === 'program_umap_cell_type') {
+                return; // Skip these, they'll be shown in the modal
+            }
+            
             // If imageMapping is provided, only show images that are in the mapping
             if (imageMapping && !imageMapping.hasOwnProperty(key)) {
                 return; // Skip this image
@@ -569,67 +674,82 @@ class HCAAtlasApp {
                         </div>
                     `;
                 } else {
-                    // Special handling for cell type UMAP - use the same path as node overview
-                    let thumbnailPath, fullPath;
-                    if (key === 'program_umap_cell_type') {
-                        const nodeName = this.currentNode;
-                        thumbnailPath = `/api/node-summary-image/${nodeName}/umap_cell_type.png?compress=true&quality=75&max_width=400`;
-                        fullPath = `/api/node-summary-image/${nodeName}/umap_cell_type.png?compress=true&quality=85&max_width=1200`;
+                    // NEW: Handle HTML files (Plotly outputs) with iframes
+                    const isHtmlFile = path && (path.endsWith('.html') || path.includes('/api/node-summary-html/'));
+                    
+                    if (isHtmlFile) {
+                        // Render HTML file in iframe (lazy-loaded)
+                        const badge = `
+                            <div class="combined-badge">
+                                <i class="fas fa-mouse-pointer"></i>
+                                Interactive
+                            </div>
+                        `;
+                        
+                        grid += `
+                            <div class="image-item">
+                                <div class="image-header">
+                                    <div class="image-title">${title}</div>
+                                    <div class="image-subtitle">${key}</div>
+                                </div>
+                                <div class="image-container iframe-container" style="position: relative; min-height: 400px;">
+                                    <iframe data-src="${path}" 
+                                            style="width:100%; height:400px; border:none; opacity:0; transition:opacity 0.3s;"
+                                            onload="this.style.opacity=1"
+                                            onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>No image found</div>'">
+                                    </iframe>
+                                    <div class="image-loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                                        <i class="fas fa-spinner fa-pulse"></i> Click to load...
+                                    </div>
+                                    ${badge}
+                                </div>
+                            </div>
+                        `;
                     } else {
-                        // Regular image handling for Activity and Leiden UMAPs
-                        const basePath = `/api/images/${path.replace('/mnt/vdd/hca_lung_atlas_tree/test_setup/assets/', '')}`;
-                        
-                        // Increase resolution by 30% for Activity and Leiden UMAPs (400 * 1.3 = 520)
-                        const isActivityOrLeiden = key === 'program_umap_activity' || key === 'program_umap_leiden';
-                        const maxWidth = isActivityOrLeiden ? 520 : 400;
-                        
-                        thumbnailPath = `${basePath}?compress=true&quality=75&max_width=${maxWidth}`;
-                        fullPath = `${basePath}?compress=true&quality=85&max_width=1200`;
+                        // Handle PNG files
+                        // Special handling for program_umap_activity - show modal with both HTML UMAPs
+                        if (key === 'program_umap_activity') {
+                            grid += `
+                                <div class="image-item" style="max-width: 455px; margin: 0 auto;">
+                                    <div class="image-header">
+                                        <div class="image-title">${title}</div>
+                                        <div class="image-subtitle">Click to view interactive UMAPs</div>
+                                    </div>
+                                    <div class="image-container program-umap-dual" 
+                                         data-umap-activity-path="${path}"
+                                         data-umap-cell-type-path="${images['program_umap_cell_type'] || ''}"
+                                         data-image-title="${title}"
+                                         style="cursor: pointer;">
+                                        <img src="${path}" alt="${title}" loading="lazy" 
+                                             style="max-width: 100%; height: auto; border-radius: 8px;"
+                                             onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Image not found</div>'">
+                                        <div class="combined-badge" style="font-size: 11px; padding: 4px 8px; gap: 4px;">
+                                            <i class="fas fa-expand-arrows-alt" style="font-size: 10px;"></i>
+                                            View Interactive
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            grid += `
+                                <div class="image-item">
+                                    <div class="image-header">
+                                        <div class="image-title">${title}</div>
+                                        <div class="image-subtitle">${key}</div>
+                                    </div>
+                                    <div class="image-container" 
+                                         data-image-src="${path}" 
+                                         data-image-title="${title}" 
+                                         data-image-subtitle="${key}"
+                                         style="cursor: pointer;">
+                                        <img src="${path}" alt="${title}" loading="lazy" 
+                                             style="max-width: 100%; height: auto; border-radius: 8px;"
+                                             onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Image not found</div>'">
+                                    </div>
+                                </div>
+                            `;
+                        }
                     }
-                    
-                    // Check if this is a program activity UMAP or cell type UMAP that gets enhanced modal treatment
-                    const isActivityUmap = key === 'program_umap_activity';
-                    const isCellTypeUmap = key === 'program_umap_cell_type';
-                    const isSpecialUmap = isActivityUmap || isCellTypeUmap;
-                    
-                    let containerClass = 'image-container';
-                    if (isActivityUmap) {
-                        containerClass = 'image-container program-activity-umap';
-                    } else if (isCellTypeUmap) {
-                        containerClass = 'image-container program-cell-type-umap';
-                    }
-                    
-                    let badge = '';
-                    if (isActivityUmap) {
-                        badge = `
-                            <div class="combined-badge">
-                                <i class="fas fa-mouse-pointer"></i>
-                                Interactive
-                            </div>
-                        `;
-                    } else if (isCellTypeUmap) {
-                        badge = `
-                            <div class="combined-badge">
-                                <i class="fas fa-mouse-pointer"></i>
-                                Interactive
-                            </div>
-                        `;
-                    }
-                    
-                    grid += `
-                        <div class="image-item">
-                            <div class="image-header">
-                                <div class="image-title">${title}</div>
-                                <div class="image-subtitle">${key}</div>
-                            </div>
-                            <div class="${containerClass}" data-image-src="${fullPath}" data-image-title="${title}" data-image-subtitle="${key}" style="position: relative;">
-                                <img src="${thumbnailPath}" alt="${title}" loading="lazy" 
-                                     onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Image not available</div>'"
-                                     onload="this.style.opacity=1" style="opacity:0;transition:opacity 0.3s;cursor:pointer">
-                                ${badge}
-                            </div>
-                        </div>
-                    `;
                 }
             }
         });
@@ -645,10 +765,44 @@ class HCAAtlasApp {
         if (content.classList.contains('expanded')) {
             content.classList.remove('expanded');
             icon.classList.remove('expanded');
+            icon.classList.remove('fa-chevron-down');
+            icon.classList.add('fa-chevron-right');
         } else {
             content.classList.add('expanded');
             icon.classList.add('expanded');
+            icon.classList.remove('fa-chevron-right');
+            icon.classList.add('fa-chevron-down');
+            // Lazy-load iframes when expanding
+            this.loadIframesInElement(content);
         }
+    }
+
+    toggleClusterDropdown(clusterHeader) {
+        const dropdownItem = clusterHeader.closest('.cluster-dropdown-item');
+        const content = dropdownItem.querySelector('.cluster-dropdown-content');
+        const icon = clusterHeader.querySelector('.cluster-expand-icon');
+        
+        if (content.style.display === 'none') {
+            // Open dropdown
+            content.style.display = 'block';
+            icon.classList.remove('fa-chevron-right');
+            icon.classList.add('fa-chevron-down');
+        } else {
+            // Close dropdown
+            content.style.display = 'none';
+            icon.classList.remove('fa-chevron-down');
+            icon.classList.add('fa-chevron-right');
+        }
+    }
+    
+    loadIframesInElement(element) {
+        // Find all iframes with data-src attribute (not yet loaded)
+        const lazyIframes = element.querySelectorAll('iframe[data-src]:not([src])');
+        lazyIframes.forEach(iframe => {
+            iframe.src = iframe.dataset.src;
+            // Optional: add a loaded class for styling
+            iframe.classList.add('iframe-loaded');
+        });
     }
 
     scrollToAndExpandProgram(programName) {
@@ -699,8 +853,8 @@ class HCAAtlasApp {
             content.classList.remove('expanded');
             icon.classList.remove('expanded');
             content.style.display = 'none';
-            icon.classList.remove('fa-chevron-up');
-            icon.classList.add('fa-chevron-down');
+            icon.classList.remove('fa-chevron-down');
+            icon.classList.add('fa-chevron-right');
             return;
         }
         
@@ -708,8 +862,8 @@ class HCAAtlasApp {
         content.classList.add('expanded');
         icon.classList.add('expanded');
         content.style.display = 'block';
-        icon.classList.remove('fa-chevron-down');
-        icon.classList.add('fa-chevron-up');
+        icon.classList.remove('fa-chevron-right');
+        icon.classList.add('fa-chevron-down');
         
         // Load data if not already loaded
         const cacheKey = `${this.currentNode}-${programName}-${section}`;
@@ -886,6 +1040,97 @@ class HCAAtlasApp {
         document.body.style.overflow = 'hidden'; // Prevent background scrolling
     }
 
+    openDualUmapModal(activityPngPath, cellTypePngPath, title) {
+        const modal = document.getElementById('image-modal');
+        const modalTitle = document.getElementById('image-modal-title');
+        const modalSubtitle = document.getElementById('image-modal-subtitle');
+        const modalBody = modal.querySelector('.image-modal-body');
+        
+        // Add class for combined content
+        modalBody.classList.add('combined-content');
+        
+        // Convert PNG paths to HTML paths
+        const activityHtmlPath = activityPngPath.replace('.png', '.html');
+        const cellTypeHtmlPath = cellTypePngPath.replace('.png', '.html');
+        
+        // Create side-by-side layout with both HTML iframes - much larger sizing with proper scaling
+        modalBody.innerHTML = `
+            <div class="combined-umap-container" style="display: flex; gap: 20px; width: 100%; height: 80vh; max-width: 1800px; margin: 0 auto;">
+                <div class="umap-panel" style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                    <h4 style="margin: 0 0 10px 0; text-align: center; font-size: 16px;">Program Activity</h4>
+                    <div style="width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: white;">
+                        <iframe 
+                            src="${activityHtmlPath}" 
+                            style="width: 100%; height: 100%; border: none; transform: scale(0.85); transform-origin: top left; width: 117.65%; height: 117.65%;"
+                            title="Program Activity UMAP">
+                        </iframe>
+                    </div>
+                </div>
+                <div class="umap-panel" style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                    <h4 style="margin: 0 0 10px 0; text-align: center; font-size: 16px;">Cell Types</h4>
+                    <div style="width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: white;">
+                        <iframe 
+                            src="${cellTypeHtmlPath}" 
+                            style="width: 100%; height: 100%; border: none; transform: scale(0.85); transform-origin: top left; width: 117.65%; height: 117.65%;"
+                            title="Cell Type UMAP">
+                        </iframe>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        modalTitle.textContent = title;
+        modalSubtitle.textContent = 'Interactive UMAPs';
+        
+        // Make the modal content container larger
+        const modalContent = modal.querySelector('.image-modal-content');
+        if (modalContent) {
+            modalContent.style.width = '95vw';
+            modalContent.style.maxWidth = '95vw';
+            modalContent.style.height = '95vh';
+        }
+        
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
+    openSingleUmapModal(htmlPath, title) {
+        const modal = document.getElementById('image-modal');
+        const modalTitle = document.getElementById('image-modal-title');
+        const modalSubtitle = document.getElementById('image-modal-subtitle');
+        const modalBody = modal.querySelector('.image-modal-body');
+        
+        // Add class for combined content
+        modalBody.classList.add('combined-content');
+        
+        // Create single UMAP with proper scaling
+        modalBody.innerHTML = `
+            <div style="width: 100%; height: 80vh; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column;">
+                <div style="width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: white;">
+                    <iframe 
+                        src="${htmlPath}" 
+                        style="width: 117.65%; height: 117.65%; border: none; transform: scale(0.85); transform-origin: top left;"
+                        title="${title}">
+                    </iframe>
+                </div>
+            </div>
+        `;
+        
+        modalTitle.textContent = title;
+        modalSubtitle.textContent = 'Interactive UMAP';
+        
+        // Make the modal content container larger
+        const modalContent = modal.querySelector('.image-modal-content');
+        if (modalContent) {
+            modalContent.style.width = '95vw';
+            modalContent.style.maxWidth = '95vw';
+            modalContent.style.height = '95vh';
+        }
+        
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
     openCombinedUmapModal(nodeName, title, subtitle) {
         const modal = document.getElementById('image-modal');
         const modalTitle = document.getElementById('image-modal-title');
@@ -1000,6 +1245,7 @@ class HCAAtlasApp {
     closeImageModal() {
         const modal = document.getElementById('image-modal');
         const modalBody = modal.querySelector('.image-modal-body');
+        const modalContent = modal.querySelector('.image-modal-content');
         
         modal.style.display = 'none';
         document.body.style.overflow = ''; // Restore scrolling
@@ -1009,6 +1255,13 @@ class HCAAtlasApp {
         if (iframe) {
             // Reset to default image structure
             modalBody.innerHTML = `<img id="image-modal-img" src="" alt="" />`;
+        }
+        
+        // Reset modal content sizing to default
+        if (modalContent) {
+            modalContent.style.width = '';
+            modalContent.style.maxWidth = '';
+            modalContent.style.height = '';
         }
         
         // Remove interactive and combined content classes
@@ -1037,7 +1290,7 @@ class HCAAtlasApp {
                         </div>
                         <div class="program-summary">${this.createDataOverviewInline(nodeInfo)}</div>
                     </div>
-                    <i class="fas fa-chevron-up expand-icon expanded"></i>
+                    <i class="fas fa-chevron-down expand-icon expanded"></i>
                 </div>
                 <div class="program-content expanded">
                     ${this.currentNodeSummary ? this.createNodeSummaryContent(this.currentNodeSummary) : ''}
@@ -1060,7 +1313,7 @@ class HCAAtlasApp {
                 <div class="section">
                     <div class="section-header">
                         <h4>Data Overview</h4>
-                        <i class="fas fa-chevron-down expand-icon"></i>
+                        <i class="fas fa-chevron-right expand-icon"></i>
                     </div>
                     <div class="section-content">
                         ${dataOverview}
@@ -1092,7 +1345,8 @@ class HCAAtlasApp {
             // Define the desired order of heatmaps
             const heatmapOrder = [
                 'cluster_by_cell_type_heatmap',
-                'cell_type_by_program_activity_heatmap', 
+                'cell_type_by_program_activity_heatmap',
+                'heatmap_celltype_leiden_composition',
                 'leiden_cluster_by_program_activity_heatmap'
             ];
             
@@ -1101,29 +1355,100 @@ class HCAAtlasApp {
                     const displayName = figureName
                         .replace(/_/g, ' ')
                         .replace(/\b\w/g, l => l.toUpperCase());
-                        
-                    content += `
-                        <div class="heatmap-display-item" style="max-width: 500px; width: 100%;">
-                            <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
-                                <div class="image-title">${displayName}</div>
-                                <div class="image-subtitle">Node Summary</div>
+                    
+                    const htmlPath = figures[figureName];
+                    const isHtmlFile = htmlPath && (htmlPath.endsWith('.html') || htmlPath.includes('/api/node-summary-html/'));
+                    
+                    if (isHtmlFile) {
+                        // Render as iframe for HTML files (lazy-loaded - Node Overview is expanded by default)
+                        content += `
+                            <div class="heatmap-display-item" style="max-width: 650px; width: 100%;">
+                                <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
+                                    <div class="image-title">${displayName}</div>
+                                    <div class="image-subtitle">Node Summary</div>
+                                </div>
+                                <div style="display: flex; justify-content: center; position: relative; min-height: 550px;">
+                                    <iframe data-src="${htmlPath}" 
+                                            style="width:100%; height:550px; border:none; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1);"
+                                            onerror="this.parentElement.innerHTML='<div style=&quot;text-align:center;padding:2rem;&quot;>No image found</div>'">
+                                    </iframe>
+                                    <div class="image-loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                                        <i class="fas fa-spinner fa-pulse"></i> Loading...
+                                    </div>
+                                </div>
                             </div>
-                            <div class="image-container" 
-                                 data-image-src="/api/node-summary-image/${summaryData.node_name}/${figureName}.png?compress=true&quality=95&max_width=2000" 
-                                 data-image-title="${displayName}"
-                                 data-image-subtitle="Node Summary"
-                                 style="display: flex; justify-content: center;">
-                                <img src="/api/node-summary-image/${summaryData.node_name}/${figureName}.png?compress=true&quality=85&max_width=500" 
-                                     alt="${displayName}" 
-                                     loading="lazy"
-                                     onerror="this.parentElement.innerHTML='<div class=&quot;image-loading&quot;>Image not available</div>'"
-                                     onload="this.style.opacity=1" 
-                                     style="opacity:0;transition:opacity 0.3s;cursor:pointer; width: 100%; height: auto; max-width: 500px; border: 1px solid #ddd; border-radius: 8px;">
+                        `;
+                    } else {
+                        // Handle PNG files
+                        content += `
+                            <div class="heatmap-display-item" style="max-width: 650px; width: 100%;">
+                                <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
+                                    <div class="image-title">${displayName}</div>
+                                    <div class="image-subtitle">Node Summary</div>
+                                </div>
+                                <div class="image-container" 
+                                     data-image-src="${htmlPath}" 
+                                     data-image-title="${displayName}" 
+                                     data-image-subtitle="Node Summary"
+                                     style="display: flex; justify-content: center; cursor: pointer;">
+                                    <img src="${htmlPath}" alt="${displayName}" 
+                                         style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                                         onerror="this.parentElement.innerHTML='<div style=&quot;text-align:center;padding:2rem;color:#999;&quot;>No image found</div>'">
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    }
                 }
             });
+            
+            content += `</div></div>`;
+            
+            // Add UMAPs section
+            const nodeName = summaryData.node_name;
+            const cellTypeUmapPngPath = `/api/node-summary-image/${nodeName}/umap_by_cell_type.png`;
+            const cellTypeUmapHtmlPath = `/api/node-summary-html/${nodeName}/umap_by_cell_type.html`;
+            const leidenUmapPngPath = `/api/node-summary-image/${nodeName}/umap_by_leiden.png`;
+            const leidenUmapHtmlPath = `/api/node-summary-html/${nodeName}/umap_by_leiden.html`;
+            
+            content += `<div class="summary-umaps-section" style="margin: 2rem 0;">`;
+            content += `<h4 style="text-align: center; margin-bottom: 1.5rem;">UMAPs</h4>`;
+            content += `<div class="umap-display-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; justify-items: center;">`;
+            
+            // Add cell type UMAP
+            content += `
+                <div class="heatmap-display-item" style="max-width: 650px; width: 100%; margin: 0 auto;">
+                    <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
+                        <div class="image-title">Cell Type UMAP</div>
+                        <div class="image-subtitle">Node Summary</div>
+                    </div>
+                    <div class="image-container cell-type-umap-modal" 
+                         data-umap-html-path="${cellTypeUmapHtmlPath}"
+                         data-image-title="Cell Type UMAP"
+                         style="display: flex; justify-content: center; cursor: pointer; position: relative;">
+                        <img src="${cellTypeUmapPngPath}" alt="Cell Type UMAP" 
+                             style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                             onerror="this.parentElement.innerHTML='<div style=&quot;text-align:center;padding:2rem;color:#999;&quot;>No image found</div>'">
+                    </div>
+                </div>
+            `;
+            
+            // Add leiden UMAP
+            content += `
+                <div class="heatmap-display-item" style="max-width: 650px; width: 100%; margin: 0 auto;">
+                    <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
+                        <div class="image-title">Leiden Cluster UMAP</div>
+                        <div class="image-subtitle">Node Summary</div>
+                    </div>
+                    <div class="image-container leiden-umap-modal" 
+                         data-umap-html-path="${leidenUmapHtmlPath}"
+                         data-image-title="Leiden Cluster UMAP"
+                         style="display: flex; justify-content: center; cursor: pointer; position: relative;">
+                        <img src="${leidenUmapPngPath}" alt="Leiden Cluster UMAP" 
+                             style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                             onerror="this.parentElement.innerHTML='<div style=&quot;text-align:center;padding:2rem;color:#999;&quot;>No image found</div>'">
+                    </div>
+                </div>
+            `;
             
             content += `</div></div>`;
         }
@@ -1173,9 +1498,12 @@ class HCAAtlasApp {
                 const geneCount = programGeneCounts[programNum];
                 const geneCountText = geneCount ? ` (${geneCount} genes)` : '';
                 
+                // Convert to 1-based indexing for display
+                const programNum1Based = parseInt(programNum) + 1;
+                
                 content += `
                     <div class="program-label-item clickable-program-label" data-program="program_${programNum}">
-                        <span class="program-label-num">Program ${programNum}${geneCountText}:</span>
+                        <span class="program-label-num">Program ${programNum1Based}${geneCountText}:</span>
                         <span class="program-label-text" title="${label}">${label}</span>
                     </div>
                 `;
@@ -1223,7 +1551,7 @@ class HCAAtlasApp {
                 <div class="section">
                     <div class="section-header">
                         <h4>Data Overview</h4>
-                        <i class="fas fa-chevron-down expand-icon"></i>
+                        <i class="fas fa-chevron-right expand-icon"></i>
                     </div>
                     <div class="section-content">
                         ${dataOverview}
@@ -1239,7 +1567,7 @@ class HCAAtlasApp {
                 <div class="section">
                     <div class="section-header">
                         <h4>Programs Summary</h4>
-                        <i class="fas fa-chevron-down expand-icon"></i>
+                        <i class="fas fa-chevron-right expand-icon"></i>
                     </div>
                     <div class="section-content">
                         ${programsSummary}
@@ -1255,7 +1583,7 @@ class HCAAtlasApp {
                 <div class="section">
                     <div class="section-header">
                         <h4>Overview Visualizations</h4>
-                        <i class="fas fa-chevron-down expand-icon"></i>
+                        <i class="fas fa-chevron-right expand-icon"></i>
                     </div>
                     <div class="section-content">
                         ${overviewViz}
@@ -1290,12 +1618,37 @@ class HCAAtlasApp {
                 const cellTypeCounts = this.currentNodeSummary.cell_type_counts;
                 if (Object.keys(cellTypeCounts).length > 0) {
                     content += '<p><strong>Cell Type Distribution:</strong></p><ul>';
+                    
+                    // Calculate total cells
+                    const totalCells = Object.values(cellTypeCounts).reduce((sum, count) => sum + count, 0);
+                    
                     // Sort by count in descending order
                     const sortedCellTypes = Object.entries(cellTypeCounts)
                         .sort(([,a], [,b]) => b - a);
+                    
+                    // Group cell types < 1% into "Other"
+                    const mainCellTypes = [];
+                    let otherCount = 0;
+                    
                     sortedCellTypes.forEach(([cellType, count]) => {
+                        const percentage = (count / totalCells) * 100;
+                        if (percentage >= 1.0) {
+                            mainCellTypes.push([cellType, count]);
+                        } else {
+                            otherCount += count;
+                        }
+                    });
+                    
+                    // Display main cell types
+                    mainCellTypes.forEach(([cellType, count]) => {
                         content += `<li>${cellType}: ${count.toLocaleString()}</li>`;
                     });
+                    
+                    // Display "Other" if there are any
+                    if (otherCount > 0) {
+                        content += `<li>Other: ${otherCount.toLocaleString()}</li>`;
+                    }
+                    
                     content += '</ul>';
                 }
             }
@@ -1414,6 +1767,8 @@ class HCAAtlasApp {
                 if (nodeData && nodeData.node_info && Object.keys(nodeData.node_info).length > 0) {
                     const nodeInfoContainer = document.getElementById('node-info-container');
                     nodeInfoContainer.innerHTML = this.createNodeInfoSection(nodeData.node_info);
+                    // Load iframes in Node Overview section since it's expanded by default
+                    this.loadIframesInElement(nodeInfoContainer);
                 }
             } else {
                 // Node summary not available, hide the container
@@ -1440,6 +1795,138 @@ class HCAAtlasApp {
         if (summaryContainer) {
             summaryContainer.style.display = 'none';
         }
+    }
+
+    async loadCellClusters(nodeName) {
+        try {
+            const response = await fetch(`/api/node/${nodeName}/leiden-clusters`);
+            if (response.ok) {
+                const clusterData = await response.json();
+                this.renderCellClusters(clusterData);
+            } else {
+                // Cell clusters not available, hide the container
+                const clusterContainer = document.getElementById('cell-clusters-container');
+                if (clusterContainer) {
+                    clusterContainer.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            console.warn('Cell clusters not available:', error);
+            const clusterContainer = document.getElementById('cell-clusters-container');
+            if (clusterContainer) {
+                clusterContainer.style.display = 'none';
+            }
+        }
+    }
+
+    renderCellClusters(clusterData) {
+        let clusterContainer = document.getElementById('cell-clusters-container');
+        
+        // Create container if it doesn't exist
+        if (!clusterContainer) {
+            clusterContainer = document.createElement('div');
+            clusterContainer.id = 'cell-clusters-container';
+            
+            // Insert after node-info-container
+            const nodeInfoContainer = document.getElementById('node-info-container');
+            if (nodeInfoContainer && nodeInfoContainer.parentNode) {
+                nodeInfoContainer.parentNode.insertBefore(clusterContainer, nodeInfoContainer.nextSibling);
+            }
+        }
+        
+        const { cluster_labels, cluster_summaries, cluster_cell_types, cluster_cell_counts } = clusterData;
+        
+        // If no clusters, hide container
+        if (!cluster_labels || Object.keys(cluster_labels).length === 0) {
+            clusterContainer.style.display = 'none';
+            return;
+        }
+        
+        clusterContainer.style.display = 'block';
+        clusterContainer.innerHTML = this.createCellClustersContent(cluster_labels, cluster_summaries, cluster_cell_types, cluster_cell_counts);
+    }
+
+    createCellClustersContent(clusterLabels, clusterSummaries, clusterCellTypes, clusterCellCounts) {
+        // Sort clusters numerically by cluster number
+        const sortedClusters = Object.entries(clusterLabels).sort(([a], [b]) => {
+            const numA = parseInt(a.replace('cluster_', ''));
+            const numB = parseInt(b.replace('cluster_', ''));
+            return numA - numB;
+        });
+
+        // Create cluster dropdown items
+        let clusterDropdowns = '';
+        sortedClusters.forEach(([clusterKey, label]) => {
+            const clusterNum = clusterKey.replace('cluster_', '');
+            const summary = clusterSummaries[clusterKey] || 'No description available.';
+            const cellTypes = clusterCellTypes[clusterKey] || [];
+            const cellCount = clusterCellCounts[clusterKey];
+            
+            // Create cell type composition HTML
+            let cellTypeHTML = '';
+            if (cellTypes && cellTypes.length > 0) {
+                cellTypeHTML = `
+                    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                        <h4 style="margin: 0 0 0.75rem 0; font-size: 0.95rem; font-weight: 600; color: var(--text-color);">Cell Type Composition</h4>
+                        <div style="display: grid; gap: 0.5rem;">
+                            ${cellTypes.map(ct => `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: #f8f9fa; border-radius: 4px;">
+                                    <span style="font-weight: 500; color: var(--text-color);">${ct.cell_type}</span>
+                                    <span style="color: var(--primary-color); font-weight: 600;">${ct.percentage}%</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Add cell count if available
+            let cellCountHTML = '';
+            if (cellCount !== undefined && cellCount !== null) {
+                cellCountHTML = `
+                    <div style="margin-top: 0.75rem; padding: 0.5rem; background: #e3f2fd; border-radius: 4px; text-align: center;">
+                        <span style="font-weight: 600; color: var(--primary-color);">Total Cells: ${cellCount.toLocaleString()}</span>
+                    </div>
+                `;
+            }
+            
+            clusterDropdowns += `
+                <div class="cluster-dropdown-item" style="margin-bottom: 0.5rem;">
+                    <div class="cluster-dropdown-header" style="display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; background: #f8f9fa; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: background-color 0.2s ease;">
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <span style="font-weight: 600; color: var(--primary-color); min-width: 2rem;">Cluster ${clusterNum}</span>
+                            <span style="color: var(--text-color);">${label}</span>
+                        </div>
+                        <i class="fas fa-chevron-right cluster-expand-icon" style="color: var(--text-secondary); transition: transform 0.3s ease;"></i>
+                    </div>
+                    <div class="cluster-dropdown-content" style="display: none; padding: 1.5rem; background: white; border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 6px 6px; margin-top: -6px;">
+                        ${cellCountHTML}
+                        ${cellTypeHTML}
+                        <p style="line-height: 1.6; color: var(--text-color); white-space: pre-wrap; margin: ${cellTypeHTML || cellCountHTML ? '1rem 0 0 0' : '0'}; ${cellTypeHTML || cellCountHTML ? 'padding-top: 1rem; border-top: 1px solid var(--border-color);' : ''}">${summary}</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        return `
+            <div class="program-card cell-clusters-card" style="margin-bottom: 2rem;">
+                <div class="program-header">
+                    <div class="program-header-content">
+                        <div class="program-name-row">
+                            <h3 class="program-name">
+                                Cell Clusters
+                            </h3>
+                        </div>
+                    </div>
+                    <i class="fas fa-chevron-down expand-icon expanded"></i>
+                </div>
+                <div class="program-content expanded">
+                    <div class="cluster-dropdowns-container">
+                        ${clusterDropdowns}
+                    </div>
+                </div>
+            </div>
+        `;
     }
 
     createNodeSummarySection(summaryData) {
@@ -1474,9 +1961,12 @@ class HCAAtlasApp {
                     const geneCount = programGeneCounts[programNum];
                     const geneCountText = geneCount ? ` (${geneCount} genes)` : '';
                     
+                    // Convert to 1-based indexing for display
+                    const programNum1Based = parseInt(programNum) + 1;
+                    
                     content += `
                         <div class="program-label-item clickable-program-label" data-program="program_${programNum}">
-                            <span class="program-label-num">Program ${programNum}${geneCountText}:</span>
+                            <span class="program-label-num">Program ${programNum1Based}${geneCountText}:</span>
                             <span class="program-label-text" title="${label}">${label}</span>
                         </div>
                     `;

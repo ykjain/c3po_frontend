@@ -1,0 +1,93 @@
+{
+  "name": "root",
+  "children": [
+    {
+      "name": "root_c_1",
+      "children": []
+    },
+    {
+      "name": "root_c_10",
+      "children": []
+    },
+    {
+      "name": "root_c_11",
+      "children": []
+    },
+    {
+      "name": "root_c_12",
+      "children": []
+    },
+    {
+      "name": "root_c_13",
+      "children": []
+    },
+    {
+      "name": "root_c_14",
+      "children": []
+    },
+    {
+      "name": "root_c_15",
+      "children": []
+    },
+    {
+      "name": "root_c_2",
+      "children": []
+    },
+    {
+      "name": "root_c_3",
+      "children": []
+    },
+    {
+      "name": "root_c_4",
+      "children": []
+    },
+    {
+      "name": "root_c_5",
+      "children": []
+    },
+    {
+      "name": "root_c_6",
+      "children": []
+    },
+    {
+      "name": "root_c_7",
+      "children": []
+    },
+    {
+      "name": "root_c_8",
+      "children": []
+    },
+    {
+      "name": "root_c_9",
+      "children": []
+    },
+    {
+      "name": "root_cell_type_B",
+      "children": []
+    },
+    {
+      "name": "root_cell_type_Epi",
+      "children": []
+    },
+    {
+      "name": "root_cell_type_Mast",
+      "children": []
+    },
+    {
+      "name": "root_cell_type_Myeloid",
+      "children": []
+    },
+    {
+      "name": "root_cell_type_Plasma",
+      "children": []
+    },
+    {
+      "name": "root_cell_type_Strom",
+      "children": []
+    },
+    {
+      "name": "root_cell_type_TNKILC",
+      "children": []
+    }
+  ]
+}

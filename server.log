@@ -1,0 +1,5 @@
+nohup: ignoring input
+Traceback (most recent call last):
+  File "/mnt/vdd/hca_lung_atlas_tree/display/server.py", line 10, in <module>
+    from flask_cors import CORS
+ModuleNotFoundError: No module named 'flask_cors'

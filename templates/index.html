@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HCA Lung Atlas Tree - Gene Programs</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}">
+    <title>Colorectal Cancer Atlas</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ range(1, 10000) | random }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}?v={{ range(1, 10000) | random }}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -14,7 +14,7 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1 class="title">HCA Lung Atlas Tree</h1>
+                <h1 class="title">Colorectal Cancer Atlas</h1>
                 <p class="subtitle">Gene Programs and Expression Analysis</p>
             </div>
             <div class="stats-bar">
@@ -44,10 +44,10 @@
 
             <!-- Content Area -->
             <main class="content">
-                <div id="welcome-screen" class="welcome-screen">
+                <div id="welcome-screen" class="welcome-screen" style="display: none;">
                     <div class="welcome-content">
                         <i class="fas fa-project-diagram welcome-icon"></i>
-                        <h2>Welcome to HCA Lung Atlas Tree</h2>
+                        <h2>Welcome to Colorectal Cancer Atlas</h2>
                         <p>Select a node from the tree on the left to explore gene programs and their associated data.</p>
                         <div class="feature-list">
                             <div class="feature-item">
@@ -115,7 +115,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ range(1, 10000) | random }}"></script>
+    <script src="{{ url_for('static', filename='js/chat.js') }}?v={{ range(1, 10000) | random }}"></script>
 </body>
 </html>
