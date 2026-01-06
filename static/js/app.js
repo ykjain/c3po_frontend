@@ -1346,13 +1346,21 @@ class HCAAtlasApp {
             const heatmapOrder = [
                 'cluster_by_cell_type_heatmap',
                 'cell_type_by_program_activity_heatmap',
-                'heatmap_celltype_leiden_composition',
-                'leiden_cluster_by_program_activity_heatmap'
+                'leiden_cluster_by_program_activity_heatmap',
+                'heatmap_celltype_leiden_composition'
             ];
+            
+            // Custom title mapping
+            const heatmapTitles = {
+                'cell_type_by_program_activity_heatmap': 'Cell Type By Program Activity',
+                'leiden_cluster_by_program_activity_heatmap': 'Leiden Cluster by Program Activity',
+                'heatmap_celltype_leiden_composition': 'Cell Type by Leiden Cluster',
+                'cluster_by_cell_type_heatmap': 'Cluster by Cell Type'
+            };
             
             heatmapOrder.forEach(figureName => {
                 if (figures[figureName]) {
-                    const displayName = figureName
+                    const displayName = heatmapTitles[figureName] || figureName
                         .replace(/_/g, ' ')
                         .replace(/\b\w/g, l => l.toUpperCase());
                     
@@ -1365,7 +1373,6 @@ class HCAAtlasApp {
                             <div class="heatmap-display-item" style="max-width: 650px; width: 100%;">
                                 <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
                                     <div class="image-title">${displayName}</div>
-                                    <div class="image-subtitle">Node Summary</div>
                                 </div>
                                 <div style="display: flex; justify-content: center; position: relative; min-height: 550px;">
                                     <iframe data-src="${htmlPath}" 
@@ -1384,12 +1391,11 @@ class HCAAtlasApp {
                             <div class="heatmap-display-item" style="max-width: 650px; width: 100%;">
                                 <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
                                     <div class="image-title">${displayName}</div>
-                                    <div class="image-subtitle">Node Summary</div>
                                 </div>
                                 <div class="image-container" 
                                      data-image-src="${htmlPath}" 
                                      data-image-title="${displayName}" 
-                                     data-image-subtitle="Node Summary"
+                                     data-image-subtitle=""
                                      style="display: flex; justify-content: center; cursor: pointer;">
                                     <img src="${htmlPath}" alt="${displayName}" 
                                          style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
@@ -1419,7 +1425,6 @@ class HCAAtlasApp {
                 <div class="heatmap-display-item" style="max-width: 650px; width: 100%; margin: 0 auto;">
                     <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
                         <div class="image-title">Cell Type UMAP</div>
-                        <div class="image-subtitle">Node Summary</div>
                     </div>
                     <div class="image-container cell-type-umap-modal" 
                          data-umap-html-path="${cellTypeUmapHtmlPath}"
@@ -1437,7 +1442,6 @@ class HCAAtlasApp {
                 <div class="heatmap-display-item" style="max-width: 650px; width: 100%; margin: 0 auto;">
                     <div class="image-header" style="text-align: center; margin-bottom: 1rem;">
                         <div class="image-title">Leiden Cluster UMAP</div>
-                        <div class="image-subtitle">Node Summary</div>
                     </div>
                     <div class="image-container leiden-umap-modal" 
                          data-umap-html-path="${leidenUmapHtmlPath}"
@@ -1983,9 +1987,10 @@ class HCAAtlasApp {
             content += '<div class="heatmap-grid">';
             
             const figureMapping = {
-                'cell_type_by_program_activity_heatmap': 'Cell Type by Program Activity',
+                'cell_type_by_program_activity_heatmap': 'Cell Type By Program Activity',
                 'cluster_by_cell_type_heatmap': 'Cluster by Cell Type',
-                'leiden_cluster_by_program_activity_heatmap': 'Leiden Cluster by Program Activity'
+                'leiden_cluster_by_program_activity_heatmap': 'Leiden Cluster by Program Activity',
+                'heatmap_celltype_leiden_composition': 'Cell Type by Leiden Cluster'
             };
             
             Object.entries(figures).forEach(([key, imagePath]) => {

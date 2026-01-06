@@ -6,6 +6,7 @@ Serves program data with lazy loading endpoints.
 
 import json
 import os
+import argparse
 from flask import Flask, render_template, jsonify, request, send_from_directory, Response, session, redirect, url_for
 from flask_cors import CORS
 from PIL import Image
@@ -53,7 +54,8 @@ def load_data():
     global programs_data, tree_structure
     
     # Load programs data (generated from c3po_outputs)
-    programs_file = '/home/ubuntu/display/programs.json'
+    # Use environment variable or default to sepsis data location
+    programs_file = os.environ.get('PROGRAMS_FILE', '/mnt/local/sepsis_data/c3po_outputs/programs.json')
     if os.path.exists(programs_file):
         with open(programs_file, 'r') as f:
             programs_data = json.load(f)
@@ -63,7 +65,7 @@ def load_data():
         print("  Run: cd /home/ubuntu/c3po_display && uv run python generate_display_metadata.py")
     
     # Load tree structure (generated from c3po_outputs)
-    tree_file = '/home/ubuntu/display/tree.json'
+    tree_file = os.environ.get('TREE_FILE', '/mnt/local/sepsis_data/c3po_outputs/tree.json')
     if os.path.exists(tree_file):
         with open(tree_file, 'r') as f:
             tree_structure = json.load(f)
@@ -98,7 +100,7 @@ def logout():
 @login_required
 def index():
     """Serve the main page."""
-    return render_template('index.html')
+    return render_template('index.html', atlas_title=os.environ.get('ATLAS_TITLE', 'C3PO Atlas'))
 
 @app.route('/api/tree')
 def get_tree():
@@ -268,7 +270,7 @@ def serve_images(filepath):
 def get_node_summary(node_name):
     """Get node summary figures and program labels."""
     # Updated path for new c3po_outputs structure
-    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    summary_base_path = os.environ.get('C3PO_OUTPUTS', '/mnt/local/sepsis_data/c3po_outputs')
     
     # Check if directory exists for this node (with _display_figures suffix)
     node_summary_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
@@ -357,7 +359,7 @@ def get_node_summary(node_name):
 @app.route('/api/node-summary-image/<node_name>/<path:filepath>')
 def serve_node_summary_image(node_name, filepath):
     """Serve node summary images (PNG files)."""
-    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    summary_base_path = os.environ.get('C3PO_OUTPUTS', '/mnt/local/sepsis_data/c3po_outputs')
     node_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
     
     if not os.path.exists(node_path):
@@ -375,7 +377,7 @@ def serve_node_summary_image(node_name, filepath):
 @app.route('/api/node-summary-html/<node_name>/<path:filepath>')
 def serve_node_summary_html(node_name, filepath):
     """Serve node summary HTML files (new Plotly outputs)."""
-    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    summary_base_path = os.environ.get('C3PO_OUTPUTS', '/mnt/local/sepsis_data/c3po_outputs')
     node_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
     
     if not os.path.exists(node_path):
@@ -393,7 +395,7 @@ def serve_node_summary_html(node_name, filepath):
 @app.route('/api/interactive-plot/<node_name>/<plot_name>')
 def serve_interactive_plot(node_name, plot_name):
     """Serve static PNG plot files."""
-    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    summary_base_path = os.environ.get('C3PO_OUTPUTS', '/mnt/local/sepsis_data/c3po_outputs')
     node_summary_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
     
     if not os.path.exists(node_summary_path):
@@ -416,7 +418,7 @@ def serve_interactive_plot(node_name, plot_name):
 @app.route('/api/node/<node_name>/leiden-clusters')
 def get_leiden_clusters(node_name):
     """Get leiden cluster labels and biological summaries for a node."""
-    summary_base_path = '/home/ubuntu/c3po_outputs_CRC'
+    summary_base_path = os.environ.get('C3PO_OUTPUTS', '/mnt/local/sepsis_data/c3po_outputs')
     node_summary_path = os.path.join(summary_base_path, f'{node_name}_display_figures')
     
     if not os.path.exists(node_summary_path):
@@ -493,7 +495,26 @@ def get_stats():
     })
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='C3PO Frontend Server')
+    parser.add_argument('--port', type=int, default=12534, 
+                        help='Port to run the server on (default: 12534)')
+    parser.add_argument('--passcode', type=str, default=None,
+                        help='Access passcode (default: 182638)')
+    parser.add_argument('--host', type=str, default='0.0.0.0',
+                        help='Host to bind to (default: 0.0.0.0)')
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug mode')
+    args = parser.parse_args()
+    
+    # Update global passcode if provided
+    if args.passcode:
+        PASSCODE = args.passcode
+        print(f"Using custom passcode")
+    
     load_data()
     print(f"Loaded data for {len(programs_data)} nodes")
     print(f"Total programs: {sum(len(node_data.get('programs', {})) for node_data in programs_data.values())}")
-    app.run(host='0.0.0.0', port=12534, debug=True)
+    print(f"\n🚀 Starting server on {args.host}:{args.port}")
+    print(f"   Access at: http://localhost:{args.port}")
+    print(f"   Passcode: {PASSCODE}")
+    app.run(host=args.host, port=args.port, debug=args.debug)
